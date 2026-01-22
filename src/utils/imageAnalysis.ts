@@ -20,8 +20,8 @@ async function getModels() {
     const modelId = 'jinaai/jina-clip-v1';
     const processorId = 'xenova/clip-vit-base-patch32';
 
-    processorPromise = processorPromise || AutoProcessor.from_pretrained(processorId, {device: 'auto'});
-    visionModelPromise = visionModelPromise || CLIPVisionModelWithProjection.from_pretrained(modelId, {device: 'auto', dtype: 'fp32'});
+    processorPromise = processorPromise || AutoProcessor.from_pretrained(processorId, { device: 'auto' });
+    visionModelPromise = visionModelPromise || CLIPVisionModelWithProjection.from_pretrained(modelId, { device: 'auto', dtype: 'fp32' });
     tokenizerPromise = tokenizerPromise || AutoTokenizer.from_pretrained(modelId);
   }
   const [processor, vision_model, tokenizer] = await Promise.all([
@@ -35,7 +35,7 @@ async function getModels() {
 export async function extractFeatures(photo: Photo): Promise<number[]> {
   const { processor, vision_model } = await getModels();
   const image = await RawImage.read(photo.nonHeicFile);
-  const image_inputs = await (processor as any)([image]);
+  const image_inputs = await (processor as { (images: RawImage[]): Promise<Record<string, unknown>> })([image]);
   const { image_embeds } = await vision_model(image_inputs);
   return Array.from(image_embeds.normalize(2, -1).data);
 }
@@ -160,7 +160,7 @@ export async function groupSimilarPhotos(
       const dateA = photoA.metadata?.captureDate;
       const dateB = photoB.metadata?.captureDate;
       const diffMinutes = Math.abs(dateA!.getTime() - dateB!.getTime()) / 60000;
-      if (diffMinutes > 120) continue; // > 2 h ⇒ never group
+      if (diffMinutes > 120) continue; // > 2 h => never group
 
       const threshold = (diffMinutes <= 1) ?
         Math.max(0, similarityThreshold - 0.05) :

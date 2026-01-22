@@ -1,25 +1,24 @@
 import React from 'react';
 import { usePhotoContext } from '../context/PhotoContext';
-import { 
-  Download, 
-  RefreshCcw, 
-  Undo2, 
-  Redo2, 
+import {
+  Download,
+  Undo2,
+  Redo2,
   Image as ImageIcon,
   CheckSquare,
   XSquare
 } from 'lucide-react';
 
 const Header: React.FC = () => {
-  const { 
-    state, 
-    undo, 
-    redo, 
+  const {
+    state,
+    undo,
+    redo,
     downloadSelected,
     selectAll,
     deselectAll
   } = usePhotoContext();
-  
+
   const selectedCount = state.selectedPhotos.length;
   const totalCount = state.photos.length;
   const canUndo = state.currentHistoryIndex > 0;
@@ -31,19 +30,19 @@ const Header: React.FC = () => {
         <ImageIcon size={24} className="text-blue-400" />
         <h1 className="text-2xl font-semibold">BestPick</h1>
       </div>
-      
+
       <div className="flex items-center space-x-6">
         {totalCount > 0 && (
           <>
             <div className="flex items-center space-x-2">
-              <button 
+              <button
                 onClick={selectAll}
                 className="p-2 rounded-full hover:bg-gray-700 transition-colors duration-200 flex items-center justify-center"
                 title="Select All"
               >
                 <CheckSquare size={20} className="text-blue-400" />
               </button>
-              <button 
+              <button
                 onClick={deselectAll}
                 className="p-2 rounded-full hover:bg-gray-700 transition-colors duration-200 flex items-center justify-center"
                 title="Deselect All"
@@ -53,22 +52,20 @@ const Header: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-2">
-              <button 
+              <button
                 onClick={undo}
                 disabled={!canUndo}
-                className={`p-2 rounded-full hover:bg-gray-700 transition-colors duration-200 flex items-center justify-center ${
-                  !canUndo ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
+                className={`p-2 rounded-full hover:bg-gray-700 transition-colors duration-200 flex items-center justify-center ${!canUndo ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
                 title="Undo"
               >
                 <Undo2 size={20} className="text-blue-400" />
               </button>
-              <button 
+              <button
                 onClick={redo}
                 disabled={!canRedo}
-                className={`p-2 rounded-full hover:bg-gray-700 transition-colors duration-200 flex items-center justify-center ${
-                  !canRedo ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
+                className={`p-2 rounded-full hover:bg-gray-700 transition-colors duration-200 flex items-center justify-center ${!canRedo ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
                 title="Redo"
               >
                 <Redo2 size={20} className="text-blue-400" />
@@ -78,7 +75,7 @@ const Header: React.FC = () => {
         )}
 
         {selectedCount > 0 && (
-          <button 
+          <button
             onClick={downloadSelected}
             className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-md transition-colors duration-200"
           >
@@ -86,10 +83,10 @@ const Header: React.FC = () => {
             <span>Download Selected ({selectedCount})</span>
           </button>
         )}
-        
+
         {totalCount > 0 && (
           <div className="text-sm text-gray-300">
-            {selectedCount > 0 
+            {selectedCount > 0
               ? `${selectedCount} of ${totalCount} selected`
               : `${totalCount} photos total`}
           </div>
