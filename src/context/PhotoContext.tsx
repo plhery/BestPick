@@ -1,7 +1,7 @@
 import React, { useReducer, useState, useEffect, useRef } from 'react';
 import { PhotoContext, ProcessingProgress, ProcessingStep } from './PhotoContextDef';
 import { AppState, Photo, PhotoGroup, PhotoMetadata } from '../types';
-import { analyzeImage, groupSimilarPhotos, addPhotoIncrementally, extractFeatures, prepareQualityEmbeddings } from '../utils/imageAnalysis';
+import { analyzeImage, groupSimilarPhotos, extractFeatures, prepareQualityEmbeddings } from '../utils/imageAnalysis';
 import { Tensor } from '@huggingface/transformers';
 import { isHeic, heicTo } from 'heic-to';
 
@@ -423,25 +423,12 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
           embedding: embedding,
         };
 
-        // 5. Update state and regroup (using incremental grouping for O(n) performance)
+        // 5. Update state and regroup
         updateProgress(i + 1, totalFiles, 'grouping', file.name);
-        // Get the latest state before calculating new groups
-        const currentState = stateRef.current;
-
-        // Try incremental grouping first (O(n) instead of O(n²))
-        const { groups: incrementalGroups, uniquePhotos: incrementalUnique, needsFullRegroup } = await addPhotoIncrementally(
-          newPhoto,
-          currentState.groups,
-          currentState.uniquePhotos
-        );
-
-        // Fall back to full regroup if incremental couldn't handle the case
-        let groups = incrementalGroups;
-        let uniquePhotos = incrementalUnique;
-        if (needsFullRegroup) {
-          const nextPhotos = [...currentState.photos, newPhoto];
-          ({ groups, uniquePhotos } = await groupSimilarPhotos(nextPhotos));
-        }
+        // Get the latest state photos before calculating new groups
+        const currentPhotos = stateRef.current.photos;
+        const nextPhotos = [...currentPhotos, newPhoto];
+        const { groups, uniquePhotos } = await groupSimilarPhotos(nextPhotos);
 
 
         // 6. Dispatch action to add photo and update groups
