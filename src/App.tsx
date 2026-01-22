@@ -1,5 +1,6 @@
 import React from 'react';
-import { PhotoProvider, usePhotoContext } from './context/PhotoContext';
+import { PhotoProvider } from './context/PhotoContext';
+import { usePhotoContext } from './context/usePhotoContext';
 import Header from './components/Header';
 import UploadArea from './components/UploadArea';
 import PhotoGroups from './components/PhotoGroups';
@@ -20,20 +21,20 @@ const LoadingOverlay: React.FC = () => (
 const MainContent: React.FC = () => {
   const { state, isLoading } = usePhotoContext();
   const hasPhotos = state.photos.length > 0;
-  
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-900 text-white">
       <Header />
-      
+
       {isLoading && <LoadingOverlay />}
-      
+
       <main className={`flex-1 container mx-auto py-8 ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
         {!hasPhotos ? (
           <>
             <h1 className="text-3xl font-bold mb-6 px-4">Organize Your Photos</h1>
             <UploadArea />
             <div className="mt-8 px-4 text-center">
-              <img 
+              <img
                 src={previewImageUrl}
                 alt="BestPick App Preview"
                 className="max-w-full md:max-w-4xl mx-auto rounded-lg shadow-lg border border-gray-700"
@@ -50,7 +51,7 @@ const MainContent: React.FC = () => {
           </>
         )}
       </main>
-      
+
       <footer className="bg-gray-900 border-t border-gray-800 py-4 px-6 text-center text-gray-500 text-sm">
         <p>BestPick - Declutter your photo collections</p>
       </footer>

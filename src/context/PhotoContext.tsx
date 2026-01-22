@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useReducer, useState, useEffect, useRef } from 'react';
+import React, { useReducer, useState, useEffect, useRef } from 'react';
+import { PhotoContext } from './PhotoContextDef';
 import { AppState, Photo, PhotoGroup, PhotoMetadata } from '../types';
 import { analyzeImage, groupSimilarPhotos, extractFeatures, prepareQualityEmbeddings } from '../utils/imageAnalysis';
 import { Tensor } from '@huggingface/transformers';
@@ -285,31 +286,6 @@ function reducer(state: AppState, action: PhotoAction): AppState {
   }
 }
 
-interface PhotoContextType {
-  state: AppState;
-  isLoading: boolean;
-  isPreparingEmbeddings: boolean;
-  addPhotos: (files: File[]) => void;
-  toggleSelectPhoto: (photoId: string) => void;
-  selectAllInGroup: (groupId: string) => void;
-  deselectAllInGroup: (groupId: string) => void;
-  selectAll: () => void;
-  deselectAll: () => void;
-  undo: () => void;
-  redo: () => void;
-  downloadSelected: () => void;
-  isSelected: (id: string) => boolean;
-}
-
-const PhotoContext = createContext<PhotoContextType | undefined>(undefined);
-
-export function usePhotoContext() {
-  const context = useContext(PhotoContext);
-  if (context === undefined) {
-    throw new Error('usePhotoContext must be used within a PhotoProvider');
-  }
-  return context;
-}
 
 // Helper hook to get the latest state inside async functions
 function useReducerWithLatestState<S, A>(

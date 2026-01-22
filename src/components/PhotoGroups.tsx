@@ -1,5 +1,5 @@
 import React from 'react';
-import { usePhotoContext } from '../context/PhotoContext';
+import { usePhotoContext } from '../context/usePhotoContext';
 import PhotoItem from './PhotoItem';
 import { CheckCircle, XCircle } from 'lucide-react';
 
@@ -17,25 +17,25 @@ interface PhotoGroupProps {
   similarity: number;
 }
 
-const PhotoGroup: React.FC<PhotoGroupProps> = ({ 
-  groupId, 
-  title, 
-  photos, 
+const PhotoGroup: React.FC<PhotoGroupProps> = ({
+  groupId,
+  title,
+  photos,
   similarity
 }) => {
   const { selectAllInGroup, deselectAllInGroup, toggleSelectPhoto, isSelected } = usePhotoContext();
-  
+
   const handleSelectAll = () => {
     selectAllInGroup(groupId);
   };
-  
+
   const handleDeselectAll = () => {
     deselectAllInGroup(groupId);
   };
-  
+
   // Sort photos by quality (highest first)
   const sortedPhotos = [...photos].sort((a, b) => b.quality - a.quality);
-  
+
   return (
     <div className="mb-8 bg-gray-800 rounded-lg overflow-hidden">
       <div className="p-4 flex items-center justify-between border-b border-gray-700">
@@ -60,7 +60,7 @@ const PhotoGroup: React.FC<PhotoGroupProps> = ({
           </button>
         </div>
       </div>
-      
+
       <div className="p-4 overflow-x-auto">
         <div className="flex space-x-4 pb-2">
           {sortedPhotos.map((photo, index) => (
@@ -84,11 +84,11 @@ const PhotoGroup: React.FC<PhotoGroupProps> = ({
 const PhotoGroups: React.FC = () => {
   const { state } = usePhotoContext();
   const { groups } = state;
-  
+
   if (groups.length === 0) {
     return null;
   }
-  
+
   return (
     <div className="mb-8">
       <h2 className="text-xl font-semibold mb-4 text-white px-4">Similar Photo Groups</h2>

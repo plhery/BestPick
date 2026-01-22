@@ -1,15 +1,15 @@
 import React from 'react';
-import { usePhotoContext } from '../context/PhotoContext';
+import { usePhotoContext } from '../context/usePhotoContext';
 import PhotoItem from './PhotoItem';
 
 const UniquePhotos: React.FC = () => {
   const { state, toggleSelectPhoto, isSelected } = usePhotoContext();
   const { uniquePhotos } = state;
-  
+
   if (uniquePhotos.length === 0) {
     return null;
   }
-  
+
   return (
     <div className="mb-8">
       <h2 className="text-xl font-semibold mb-4 text-white px-4">Unique Photos</h2>
