@@ -45,8 +45,8 @@ const UploadArea: React.FC = () => {
   return (
     <div
       className={`flex flex-col items-center justify-center w-full p-12 border-2 border-dashed rounded-lg transition-all duration-300 ${isDragging
-          ? 'border-blue-500 bg-blue-900 bg-opacity-20'
-          : 'border-gray-600 bg-gray-800 hover:bg-gray-750'
+        ? 'border-blue-500 bg-blue-900 bg-opacity-20'
+        : 'border-gray-600 bg-gray-800 hover:bg-gray-700'
         }`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

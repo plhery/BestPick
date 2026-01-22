@@ -20,7 +20,7 @@ const UniquePhotos: React.FC = () => {
             id={photo.id}
             url={photo.url}
             thumbnailUrl={photo.thumbnailUrl}
-            quality={photo.quality}
+            quality={photo.quality ?? 0}
             selected={isSelected(photo.id)}
             onSelect={() => toggleSelectPhoto(photo.id)}
           />

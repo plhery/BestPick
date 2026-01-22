@@ -80,6 +80,7 @@ function reducer(state: AppState, action: PhotoAction): AppState {
       }));
 
       // --- History Update ---
+      const MAX_HISTORY_SIZE = 50;
       let history = state.history;
       let currentHistoryIndex = state.currentHistoryIndex;
 
@@ -96,7 +97,13 @@ function reducer(state: AppState, action: PhotoAction): AppState {
           ...state.history.slice(0, state.currentHistoryIndex + 1),
           newHistoryEntry
         ];
-        currentHistoryIndex = history.length - 1; // Point to the new latest state
+        // Cap history size to prevent memory issues
+        if (history.length > MAX_HISTORY_SIZE) {
+          history = history.slice(history.length - MAX_HISTORY_SIZE);
+          currentHistoryIndex = MAX_HISTORY_SIZE - 1;
+        } else {
+          currentHistoryIndex = history.length - 1;
+        }
       }
       // --- End History Update ---
 
@@ -466,7 +473,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        URL.revokeObjectURL(photo.url);
+        // Note: Don't revoke URLs here as they're still needed for display
       }
     });
   };

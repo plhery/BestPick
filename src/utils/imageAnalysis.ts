@@ -126,7 +126,11 @@ export async function groupSimilarPhotos(
   const photosWithoutEmbeddings = photos.filter(p => !p.embedding || p.embedding.length === 0);
 
   if (photosWithEmbeddings.length < 2) {
-    photos.sort((a, b) => b.metadata!.captureDate!.getTime() - a.metadata!.captureDate!.getTime());
+    photos.sort((a, b) => {
+      const dateA = a.metadata?.captureDate?.getTime() ?? 0;
+      const dateB = b.metadata?.captureDate?.getTime() ?? 0;
+      return dateB - dateA;
+    });
     return { groups: [], uniquePhotos: photos };
   }
 
@@ -159,7 +163,9 @@ export async function groupSimilarPhotos(
       // Temporal filtering --------------------------------------------------
       const dateA = photoA.metadata?.captureDate;
       const dateB = photoB.metadata?.captureDate;
-      const diffMinutes = Math.abs(dateA!.getTime() - dateB!.getTime()) / 60000;
+      // Skip temporal filtering if dates are missing
+      if (!dateA || !dateB) continue;
+      const diffMinutes = Math.abs(dateA.getTime() - dateB.getTime()) / 60000;
       if (diffMinutes > 120) continue; // > 2 h => never group
 
       const threshold = (diffMinutes <= 1) ?
@@ -178,10 +184,11 @@ export async function groupSimilarPhotos(
 
     if (currentGroupPhotos.length > 1) {
       const sortedPhotos = [...currentGroupPhotos].sort((a, b) => (b.quality ?? 0) - (a.quality ?? 0));
+      const groupDate = sortedPhotos[0].metadata?.captureDate ?? new Date();
       groups.push({
         id: `${sortedPhotos[0].id}-group`,
         title: getGroupTitle(sortedPhotos[0]),
-        date: sortedPhotos[0].metadata!.captureDate!,
+        date: groupDate,
         photos: sortedPhotos,
         similarity: minSimilarityInGroup,
         similarityThreshold,
@@ -193,13 +200,17 @@ export async function groupSimilarPhotos(
 
   // Only need to sort uniquePhotos once at the end
   groups.sort((a, b) => b.date.getTime() - a.date.getTime());
-  uniquePhotos.sort((a, b) => b.metadata!.captureDate!.getTime() - a.metadata!.captureDate!.getTime());
+  uniquePhotos.sort((a, b) => {
+    const dateA = a.metadata?.captureDate?.getTime() ?? 0;
+    const dateB = b.metadata?.captureDate?.getTime() ?? 0;
+    return dateB - dateA;
+  });
   return { groups, uniquePhotos };
 }
 
 /* ---------- Utility helpers -------------------------------------------- */
 function getGroupTitle(photo: Photo): string {
-  const date = photo.metadata!.captureDate!;
+  const date = photo.metadata?.captureDate ?? new Date();
   const formattedDate = date.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',

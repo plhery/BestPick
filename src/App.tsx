@@ -5,6 +5,7 @@ import Header from './components/Header';
 import UploadArea from './components/UploadArea';
 import PhotoGroups from './components/PhotoGroups';
 import UniquePhotos from './components/UniquePhotos';
+import ErrorBoundary from './components/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
 import previewImageUrl from '../preview.png';
 
@@ -61,9 +62,11 @@ const MainContent: React.FC = () => {
 
 function App() {
   return (
-    <PhotoProvider>
-      <MainContent />
-    </PhotoProvider>
+    <ErrorBoundary>
+      <PhotoProvider>
+        <MainContent />
+      </PhotoProvider>
+    </ErrorBoundary>
   );
 }
 

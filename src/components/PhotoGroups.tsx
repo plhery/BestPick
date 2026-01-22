@@ -11,7 +11,7 @@ interface PhotoGroupProps {
     id: string;
     url: string;
     thumbnailUrl: string;
-    quality: number;
+    quality?: number;
     selected: boolean;
   }>;
   similarity: number;
@@ -33,15 +33,14 @@ const PhotoGroup: React.FC<PhotoGroupProps> = ({
     deselectAllInGroup(groupId);
   };
 
-  // Sort photos by quality (highest first)
-  const sortedPhotos = [...photos].sort((a, b) => b.quality - a.quality);
+  // Photos are already sorted by quality in the reducer/grouping logic
 
   return (
     <div className="mb-8 bg-gray-800 rounded-lg overflow-hidden">
       <div className="p-4 flex items-center justify-between border-b border-gray-700">
         <div>
           <h3 className="text-lg font-medium text-white">{title}</h3>
-          <p className="text-gray-400 text-sm">Similarity: {similarity.toFixed(2)}%</p>
+          <p className="text-gray-400 text-sm">Similarity: {(similarity * 100).toFixed(0)}%</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -63,13 +62,13 @@ const PhotoGroup: React.FC<PhotoGroupProps> = ({
 
       <div className="p-4 overflow-x-auto">
         <div className="flex space-x-4 pb-2">
-          {sortedPhotos.map((photo, index) => (
+          {photos.map((photo, index) => (
             <PhotoItem
               key={photo.id}
               id={photo.id}
               url={photo.url}
               thumbnailUrl={photo.thumbnailUrl}
-              quality={photo.quality}
+              quality={photo.quality ?? 0}
               selected={isSelected(photo.id)}
               isBest={index === 0}
               onSelect={() => toggleSelectPhoto(photo.id)}
