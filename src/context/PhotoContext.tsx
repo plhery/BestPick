@@ -1,5 +1,5 @@
 import React, { useReducer, useState, useEffect, useRef } from 'react';
-import { PhotoContext } from './PhotoContextDef';
+import { PhotoContext, ProcessingProgress, ProcessingStep } from './PhotoContextDef';
 import { AppState, Photo, PhotoGroup, PhotoMetadata } from '../types';
 import { analyzeImage, groupSimilarPhotos, extractFeatures, prepareQualityEmbeddings } from '../utils/imageAnalysis';
 import { Tensor } from '@huggingface/transformers';
@@ -314,6 +314,16 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isPreparingEmbeddings, setIsPreparingEmbeddings] = useState(true);
   const [qualityEmbeddings, setQualityEmbeddings] = useState<QualityEmbeddings>(null);
+  const [processingProgress, setProcessingProgress] = useState<ProcessingProgress | null>(null);
+
+  const updateProgress = (index: number, total: number, step: ProcessingStep, fileName: string) => {
+    setProcessingProgress({
+      currentIndex: index,
+      totalCount: total,
+      currentStep: step,
+      currentFileName: fileName,
+    });
+  };
 
   // Prepare quality embeddings once on mount
   useEffect(() => {
@@ -342,8 +352,11 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
 
     try {
-      for (const file of files) {
+      const totalFiles = files.length;
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         // 1. Prepare basic photo info
+        updateProgress(i + 1, totalFiles, 'converting', file.name);
         const id = `${file.name}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
         const ua = navigator.userAgent;
@@ -370,6 +383,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
 
 
         // 2. Extract features (embedding)
+        updateProgress(i + 1, totalFiles, 'extracting', file.name);
         let embedding: number[] | undefined = undefined;
         try {
           embedding = await extractFeatures(basicPhoto as Photo);
@@ -379,6 +393,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
 
 
         // 3. Analyze image (quality and metadata)
+        updateProgress(i + 1, totalFiles, 'scoring', file.name);
         let tempAnalysisResult: { quality: number; metadata: PhotoMetadata }; // Use PhotoMetadata which allows undefined captureDate
         try {
           tempAnalysisResult = await analyzeImage(
@@ -409,6 +424,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
         };
 
         // 5. Update state and regroup
+        updateProgress(i + 1, totalFiles, 'grouping', file.name);
         // Get the latest state photos before calculating new groups
         const currentPhotos = stateRef.current.photos;
         const nextPhotos = [...currentPhotos, newPhoto];
@@ -432,6 +448,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
       // Handle error appropriately
     } finally {
       setIsLoading(false);
+      setProcessingProgress(null);
     }
   };
 
@@ -488,6 +505,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
         state,
         isLoading,
         isPreparingEmbeddings,
+        processingProgress,
         addPhotos,
         toggleSelectPhoto,
         selectAllInGroup,
