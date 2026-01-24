@@ -16,7 +16,9 @@ const Header: React.FC = () => {
     redo,
     downloadSelected,
     selectAll,
-    deselectAll
+    deselectAll,
+    similarityThreshold,
+    setSimilarityThreshold
   } = usePhotoContext();
 
   const selectedCount = state.selectedPhotos.length;
@@ -32,6 +34,22 @@ const Header: React.FC = () => {
       </div>
 
       <div className="flex items-center space-x-6">
+        {totalCount > 0 && (
+          <div className="flex items-center space-x-2 bg-gray-800 rounded-lg px-3 py-1.5">
+            <span className="text-xs text-gray-400">Similarity</span>
+            <input
+              type="range"
+              min="0.5"
+              max="0.99"
+              step="0.01"
+              value={similarityThreshold}
+              onChange={(e) => setSimilarityThreshold(parseFloat(e.target.value))}
+              className="w-24 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+              title={`Threshold: ${Math.round(similarityThreshold * 100)}%`}
+            />
+            <span className="text-xs text-blue-400 w-8 text-right">{Math.round(similarityThreshold * 100)}%</span>
+          </div>
+        )}
         {totalCount > 0 && (
           <>
             <div className="flex items-center space-x-2">

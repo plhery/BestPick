@@ -25,6 +25,8 @@ export interface PhotoContextType {
     redo: () => void;
     downloadSelected: () => void;
     isSelected: (id: string) => boolean;
+    similarityThreshold: number;
+    setSimilarityThreshold: (threshold: number) => void;
 }
 
 export const PhotoContext = createContext<PhotoContextType | undefined>(undefined);

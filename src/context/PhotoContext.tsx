@@ -2,14 +2,10 @@ import React, { useReducer, useState, useEffect, useRef } from 'react';
 import { PhotoContext, ProcessingProgress, ProcessingStep } from './PhotoContextDef';
 import { AppState, Photo, PhotoGroup, PhotoMetadata } from '../types';
 import { analyzeImage, groupSimilarPhotos, extractFeatures, prepareQualityEmbeddings } from '../utils/imageAnalysis';
-import { Tensor } from '@huggingface/transformers';
 import { isHeic, heicTo } from 'heic-to';
 
-// Define a type for the quality embeddings
-type QualityEmbeddings = {
-  positiveEmbeddings: Tensor;
-  negativeEmbeddings: Tensor;
-} | null;
+// Define a type for the quality embeddings - matches PreparedQualityEmbeddings from imageAnalysis
+type QualityEmbeddings = Awaited<ReturnType<typeof prepareQualityEmbeddings>> | null;
 
 type PhotoAction =
   | { type: 'ADD_PHOTO_AND_UPDATE_GROUPS'; photo: Photo; groups: PhotoGroup[]; uniquePhotos: Photo[] }
@@ -19,7 +15,9 @@ type PhotoAction =
   | { type: 'SELECT_ALL' }
   | { type: 'DESELECT_ALL' }
   | { type: 'UNDO' }
-  | { type: 'REDO' };
+  | { type: 'UNDO' }
+  | { type: 'REDO' }
+  | { type: 'UPDATE_GROUPS'; groups: PhotoGroup[]; uniquePhotos: Photo[] };
 
 const initialState: AppState = {
   photos: [],
@@ -288,6 +286,14 @@ function reducer(state: AppState, action: PhotoAction): AppState {
       return newState;
     }
 
+    case 'UPDATE_GROUPS': {
+      return {
+        ...state,
+        groups: action.groups,
+        uniquePhotos: action.uniquePhotos,
+      };
+    }
+
     default:
       return state;
   }
@@ -315,6 +321,31 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
   const [isPreparingEmbeddings, setIsPreparingEmbeddings] = useState(true);
   const [qualityEmbeddings, setQualityEmbeddings] = useState<QualityEmbeddings>(null);
   const [processingProgress, setProcessingProgress] = useState<ProcessingProgress | null>(null);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.85);
+
+  // Debounced regrouping when threshold changes
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      const currentPhotos = stateRef.current.photos;
+      if (currentPhotos.length === 0) return;
+
+      setIsLoading(true);
+      try {
+        const { groups, uniquePhotos } = await groupSimilarPhotos(currentPhotos, similarityThreshold);
+        dispatch({
+          type: 'UPDATE_GROUPS',
+          groups,
+          uniquePhotos
+        });
+      } catch (error) {
+        console.error("Failed to regroup photos:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timer);
+  }, [similarityThreshold, dispatch, stateRef]);
 
   const updateProgress = (index: number, total: number, step: ProcessingStep, fileName: string) => {
     setProcessingProgress({
@@ -428,7 +459,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
         // Get the latest state photos before calculating new groups
         const currentPhotos = stateRef.current.photos;
         const nextPhotos = [...currentPhotos, newPhoto];
-        const { groups, uniquePhotos } = await groupSimilarPhotos(nextPhotos);
+        const { groups, uniquePhotos } = await groupSimilarPhotos(nextPhotos, similarityThreshold);
 
 
         // 6. Dispatch action to add photo and update groups
@@ -515,7 +546,10 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
         undo,
         redo,
         downloadSelected,
-        isSelected
+        downloadSelected,
+        isSelected,
+        similarityThreshold,
+        setSimilarityThreshold
       }}
     >
       {children}
