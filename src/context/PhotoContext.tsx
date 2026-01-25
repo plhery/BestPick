@@ -15,7 +15,6 @@ type PhotoAction =
   | { type: 'SELECT_ALL' }
   | { type: 'DESELECT_ALL' }
   | { type: 'UNDO' }
-  | { type: 'UNDO' }
   | { type: 'REDO' }
   | { type: 'UPDATE_GROUPS'; groups: PhotoGroup[]; uniquePhotos: Photo[] };
 
@@ -545,7 +544,6 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
         deselectAll,
         undo,
         redo,
-        downloadSelected,
         downloadSelected,
         isSelected,
         similarityThreshold,

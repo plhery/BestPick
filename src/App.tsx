@@ -12,7 +12,6 @@ import type { ProcessingStep } from './context/PhotoContextDef';
 
 const stepLabels: Record<ProcessingStep, { label: string; icon: React.ReactNode }> = {
   'idle': { label: 'Preparing...', icon: <Loader2 className="animate-spin h-5 w-5" /> },
-  'loading-model': { label: 'Loading AI Model...', icon: <Loader2 className="animate-spin h-5 w-5" /> },
   'converting': { label: 'Converting image...', icon: <RefreshCw className="animate-spin h-5 w-5" /> },
   'extracting': { label: 'Extracting features...', icon: <ImageIcon className="h-5 w-5" /> },
   'scoring': { label: 'Scoring quality...', icon: <Sparkles className="h-5 w-5" /> },

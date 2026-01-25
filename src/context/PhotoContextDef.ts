@@ -1,7 +1,7 @@
 import { createContext } from 'react';
 import { AppState } from '../types';
 
-export type ProcessingStep = 'idle' | 'loading-model' | 'converting' | 'extracting' | 'scoring' | 'grouping';
+export type ProcessingStep = 'idle' | 'converting' | 'extracting' | 'scoring' | 'grouping';
 
 export interface ProcessingProgress {
     currentIndex: number;
