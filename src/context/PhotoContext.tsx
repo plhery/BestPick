@@ -9,6 +9,7 @@ type QualityEmbeddings = Awaited<ReturnType<typeof prepareQualityEmbeddings>> | 
 
 type PhotoAction =
   | { type: 'ADD_PHOTO_AND_UPDATE_GROUPS'; photo: Photo; groups: PhotoGroup[]; uniquePhotos: Photo[] }
+  | { type: 'ADD_PHOTOS_BATCH_AND_UPDATE_GROUPS'; photos: Photo[]; groups: PhotoGroup[]; uniquePhotos: Photo[] }
   | { type: 'TOGGLE_SELECT_PHOTO'; photoId: string }
   | { type: 'SELECT_ALL_IN_GROUP'; groupId: string }
   | { type: 'DESELECT_ALL_IN_GROUP'; groupId: string }
@@ -112,6 +113,66 @@ function reducer(state: AppState, action: PhotoAction): AppState {
       };
 
       return finalState;
+    }
+
+    case 'ADD_PHOTOS_BATCH_AND_UPDATE_GROUPS': {
+      const { photos, groups, uniquePhotos } = action;
+
+      // Add all new photos and update groups/unique photos
+      const updatedPhotos = [...state.photos, ...photos];
+      const updatedStateBase: Omit<AppState, 'history' | 'currentHistoryIndex' | 'selectedPhotos'> = {
+        ...state,
+        photos: updatedPhotos,
+        groups,
+        uniquePhotos,
+      };
+
+      // Auto-select the best photo in each group and all unique photos
+      const autoSelectedPhotos = [
+        ...uniquePhotos.map(p => p.id),
+        ...groups.map(g => g.photos[0].id)
+      ];
+
+      // Create the final state before history update
+      const intermediateState: AppState = {
+        ...updatedStateBase,
+        selectedPhotos: autoSelectedPhotos,
+        history: state.history,
+        currentHistoryIndex: state.currentHistoryIndex,
+      };
+
+      // Update the 'selected' flag on all photos based on the new selection
+      intermediateState.photos = intermediateState.photos.map(p => ({
+        ...p,
+        selected: autoSelectedPhotos.includes(p.id)
+      }));
+
+      // --- History Update ---
+      const MAX_HISTORY_SIZE = 50;
+      const newHistoryEntry = { selectedPhotos: intermediateState.selectedPhotos, timestamp: new Date() };
+
+      const history = [
+        ...state.history.slice(0, state.currentHistoryIndex + 1),
+        newHistoryEntry
+      ];
+      let currentHistoryIndex = history.length - 1;
+
+      if (history.length > MAX_HISTORY_SIZE) {
+        const trimmedHistory = history.slice(history.length - MAX_HISTORY_SIZE);
+        currentHistoryIndex = MAX_HISTORY_SIZE - 1;
+
+        return {
+          ...intermediateState,
+          history: trimmedHistory,
+          currentHistoryIndex,
+        };
+      }
+
+      return {
+        ...intermediateState,
+        history,
+        currentHistoryIndex,
+      };
     }
 
     case 'TOGGLE_SELECT_PHOTO': {
@@ -411,6 +472,9 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const totalFiles = files.length;
+      const newPhotos: Photo[] = [];
+
+      // Process all photos first (convert, extract, score)
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         // 1. Prepare basic photo info
@@ -481,25 +545,26 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
           embedding: embedding,
         };
 
-        // 5. Update state and regroup
-        updateProgress(i + 1, totalFiles, 'grouping', file.name);
-        // Get the latest state photos before calculating new groups
+        // Add to batch instead of dispatching immediately
+        newPhotos.push(newPhoto);
+      } // End for loop
+
+      // 5. Group all photos ONCE at the end (much more efficient than grouping after each photo)
+      if (newPhotos.length > 0) {
+        updateProgress(totalFiles, totalFiles, 'grouping', 'all photos');
+
         const currentPhotos = stateRef.current.photos;
-        const nextPhotos = [...currentPhotos, newPhoto];
-        const { groups, uniquePhotos } = await groupSimilarPhotos(nextPhotos, similarityThreshold);
+        const allPhotos = [...currentPhotos, ...newPhotos];
+        const { groups, uniquePhotos } = await groupSimilarPhotos(allPhotos, similarityThreshold);
 
-
-        // 6. Dispatch action to add photo and update groups
+        // 6. Dispatch batch update - adds all photos and updates groups in one operation
         dispatch({
-          type: 'ADD_PHOTO_AND_UPDATE_GROUPS',
-          photo: newPhoto,
+          type: 'ADD_PHOTOS_BATCH_AND_UPDATE_GROUPS',
+          photos: newPhotos,
           groups,
           uniquePhotos
         });
-
-        // Optional: Add a small delay here if updates are too rapid for the UI
-        // await new Promise(resolve => setTimeout(resolve, 50));
-      } // End for loop
+      }
 
     } catch (error) {
       console.error("Error processing photos:", error);
