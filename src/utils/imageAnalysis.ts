@@ -60,11 +60,6 @@ let processorPromise: Promise<InstanceType<typeof AutoProcessor>> | null = null;
 let currentDevice: VisionDevice | null = null;
 let currentDtype: ModelDtype | null = null;
 
-function isMobileDevice(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-}
-
 function getDefaultDevice(): VisionDevice {
   if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
     return 'webgpu';
@@ -75,9 +70,11 @@ function getDefaultDevice(): VisionDevice {
   return 'cpu';
 }
 
-function getDefaultDtype(): ModelDtype {
-  // Use fp16 on mobile devices to reduce memory footprint
-  return isMobileDevice() ? 'fp16' : 'fp32';
+function getDefaultDtype(_device: VisionDevice): ModelDtype {
+  // fp16 conversion for MobileCLIP2-B causes type mismatches in attention layers.
+  // The model architecture has complex type dependencies that onnxconverter-common
+  // can't handle properly. Use fp32 - WebGPU still provides good acceleration.
+  return 'fp32';
 }
 
 /**
@@ -105,7 +102,7 @@ const HUGGINGFACE_MODEL_ID = 'plhery/mobileclip2-b-onnx';
 
 async function getModels(deviceOverride?: VisionDevice) {
   const device = deviceOverride ?? currentDevice ?? getDefaultDevice();
-  const dtype = currentDtype ?? getDefaultDtype();
+  const dtype = currentDtype ?? getDefaultDtype(device);
 
   if (!visionModelPromise || currentDevice !== device || currentDtype !== dtype) {
     currentDevice = device;
@@ -326,7 +323,7 @@ export async function analyzeImage(
         // Check if this dimension applies to the detected category
         // Also always include dimensions for 'general' category
         const applies = dimension.categories.includes(detectedCategory) ||
-                       dimension.categories.includes('general');
+          dimension.categories.includes('general');
 
         if (!applies) continue;
 
