@@ -1,7 +1,6 @@
 import { Photo, PhotoGroup, PhotoMetadata } from '../types';
 import {
   AutoProcessor,
-  AutoTokenizer,
   CLIPVisionModelWithProjection,
   RawImage,
   Tensor,
@@ -32,34 +31,123 @@ interface PreparedQualityEmbeddings {
   };
 }
 
+/* ---------- Error handling helper -------------------------------------- */
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (typeof error === 'object' && error !== null) {
+    const obj = error as Record<string, unknown>;
+    if ('message' in obj && typeof obj.message === 'string') {
+      return obj.message;
+    }
+    if ('error' in obj && typeof obj.error === 'string') {
+      return obj.error;
+    }
+  }
+  return `Unknown error (${typeof error}): ${String(error)}`;
+}
+
 /* ---------- Model lazy‑loading ----------------------------------------- */
+type VisionDevice = 'auto' | 'wasm' | 'webgpu' | 'cpu';
+
 let visionModelPromise: Promise<InstanceType<typeof CLIPVisionModelWithProjection>> | null = null;
 let processorPromise: Promise<InstanceType<typeof AutoProcessor>> | null = null;
-let tokenizerPromise: Promise<InstanceType<typeof AutoTokenizer>> | null = null;
+let currentDevice: VisionDevice | null = null;
 
-async function getModels() {
-  if (!visionModelPromise) {
-    const modelId = 'jinaai/jina-clip-v1';
-    const processorId = 'xenova/clip-vit-base-patch32';
-
-    processorPromise = processorPromise || AutoProcessor.from_pretrained(processorId, { device: 'auto' });
-    visionModelPromise = visionModelPromise || CLIPVisionModelWithProjection.from_pretrained(modelId, { device: 'auto', dtype: 'fp32' });
-    tokenizerPromise = tokenizerPromise || AutoTokenizer.from_pretrained(modelId);
+function getDefaultDevice(): VisionDevice {
+  if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
+    return 'webgpu';
   }
-  const [processor, vision_model, tokenizer] = await Promise.all([
-    processorPromise!,
-    visionModelPromise!,
-    tokenizerPromise!,
-  ]);
-  return { processor, vision_model, tokenizer };
+  if (typeof window !== 'undefined') {
+    return 'wasm';
+  }
+  return 'cpu';
+}
+
+/**
+ * Preheat the model by loading it and running a dummy inference.
+ * Call this on app startup to eliminate first-image delay.
+ */
+export async function preheatModel(): Promise<void> {
+  try {
+    const { processor, vision_model } = await getModels();
+
+    // Create a small dummy image (1x1 pixel, will be resized to 224x224 by processor)
+    const dummyImage = new RawImage(new Uint8ClampedArray([128, 128, 128, 255]), 1, 1, 4);
+    const image_inputs = await (processor as unknown as (images: RawImage[]) => Promise<{ pixel_values: Tensor }>)([dummyImage]);
+
+    // Run inference to trigger shader compilation
+    await vision_model({ pixel_values: image_inputs.pixel_values });
+
+    console.log('Model preheated successfully');
+  } catch (error) {
+    console.warn('Model preheat failed:', getErrorMessage(error));
+  }
+}
+
+const HUGGINGFACE_MODEL_ID = 'plhery/mobileclip2-b-onnx';
+
+async function getModels(deviceOverride?: VisionDevice) {
+  const device = deviceOverride ?? currentDevice ?? getDefaultDevice();
+
+  if (!visionModelPromise || currentDevice !== device) {
+    currentDevice = device;
+
+    processorPromise = processorPromise || AutoProcessor.from_pretrained(HUGGINGFACE_MODEL_ID);
+    visionModelPromise = CLIPVisionModelWithProjection.from_pretrained(HUGGINGFACE_MODEL_ID, {
+      device,
+      dtype: 'fp32',
+    });
+  }
+
+  const [processor, vision_model] = await Promise.all([processorPromise!, visionModelPromise!]);
+  return { processor, vision_model, device };
 }
 
 export async function extractFeatures(photo: Photo): Promise<number[]> {
-  const { processor, vision_model } = await getModels();
-  const image = await RawImage.read(photo.nonHeicFile);
-  const image_inputs = await (processor as { (images: RawImage[]): Promise<Record<string, unknown>> })([image]);
-  const { image_embeds } = await vision_model(image_inputs);
-  return Array.from(image_embeds.normalize(2, -1).data);
+  // Step 1: Read image
+  let image: RawImage;
+  try {
+    image = await RawImage.read(photo.nonHeicFile);
+  } catch (error) {
+    throw new Error(`Failed to read image: ${getErrorMessage(error)}`);
+  }
+
+  // Step 2: Process image
+  let pixelValues: Tensor;
+  try {
+    const { processor } = await getModels();
+    const image_inputs = await (processor as unknown as (images: RawImage[]) => Promise<{ pixel_values: Tensor }>)([image]);
+    pixelValues = image_inputs.pixel_values;
+  } catch (error) {
+    throw new Error(`Failed to process image: ${getErrorMessage(error)}`);
+  }
+
+  // Step 3: Run inference (with WebGPU -> WASM fallback)
+  try {
+    const { vision_model } = await getModels();
+    const outputs = await vision_model({ pixel_values: pixelValues });
+    const imageEmbeds = (outputs.image_embeds ?? outputs.unnorm_image_features) as Tensor;
+    return Array.from(imageEmbeds.normalize(2, -1).data);
+  } catch (error) {
+    if (currentDevice === 'webgpu') {
+      console.warn('WebGPU inference failed, falling back to WASM:', getErrorMessage(error));
+      visionModelPromise = null;
+      try {
+        const { vision_model } = await getModels('wasm');
+        const outputs = await vision_model({ pixel_values: pixelValues });
+        const imageEmbeds = (outputs.image_embeds ?? outputs.unnorm_image_features) as Tensor;
+        return Array.from(imageEmbeds.normalize(2, -1).data);
+      } catch (wasmError) {
+        throw new Error(`Inference failed (WebGPU and WASM): ${getErrorMessage(wasmError)}`);
+      }
+    }
+    throw new Error(`Inference failed: ${getErrorMessage(error)}`);
+  }
 }
 
 function createEmbeddingsSet(

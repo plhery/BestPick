@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { PhotoProvider } from './context/PhotoContext';
 import { usePhotoContext } from './context/usePhotoContext';
 import Header from './components/Header';
@@ -9,6 +9,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { Loader2, ImageIcon, Sparkles, Layers, RefreshCw } from 'lucide-react';
 import previewImageUrl from '../preview.png';
 import type { ProcessingStep } from './context/PhotoContextDef';
+import { preheatModel } from './utils/imageAnalysis';
 
 const stepLabels: Record<ProcessingStep, { label: string; icon: React.ReactNode }> = {
   'idle': { label: 'Preparing...', icon: <Loader2 className="animate-spin h-5 w-5" /> },
@@ -77,6 +78,11 @@ const LoadingOverlay: React.FC = () => {
 const MainContent: React.FC = () => {
   const { state, isLoading } = usePhotoContext();
   const hasPhotos = state.photos.length > 0;
+
+  // Preheat the AI model on app startup
+  useEffect(() => {
+    preheatModel();
+  }, []);
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-900 text-white">

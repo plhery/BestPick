@@ -1,8 +1,0 @@
-.venv/
-__pycache__/
-checkpoints/
-open_clip/
-onnx/
-
-# ONNX outputs are large; keep or remove from ignore as needed
-# onnx/

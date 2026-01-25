@@ -3,7 +3,9 @@ import {
   AutoTokenizer,
   CLIPTextModelWithProjection,
   Tensor,
+  env,
 } from '@huggingface/transformers';
+import path from 'path';
 
 // Weighted prompts for general photo quality
 // Weight indicates importance: higher = more impact on final score
@@ -77,7 +79,7 @@ const faceNegativePrompts: WeightedPrompt[] = [
   { text: 'a dark, underexposed portrait', weight: 1.3 },
 ];
 
-const MODEL_ID = 'jinaai/jina-clip-v1';
+const MODEL_ID = 'mobileclip2-b';
 
 function tensorToNested(t: Tensor): number[][] {
   const [rows, cols] = t.dims;
@@ -94,23 +96,32 @@ async function generateEmbeddings(
   textModel: InstanceType<typeof CLIPTextModelWithProjection>,
   prompts: WeightedPrompt[]
 ): Promise<{ embeddings: number[][]; weights: number[] }> {
-  const texts = prompts.map(p => p.text);
+  const embeddings: number[][] = [];
   const weights = prompts.map(p => p.weight);
 
-  const input = tokenizer(texts, { padding: true, truncation: true });
-  const { text_embeds } = await textModel(input);
-  const normed = text_embeds.normalize(2, -1);
+  for (const prompt of prompts) {
+    const input = tokenizer(prompt.text, { padding: 'max_length', truncation: true, max_length: 77 });
+    const outputs = await textModel({ text: input.input_ids });
+    const textEmbeds = (outputs.text_embeds ?? outputs.unnorm_text_features) as Tensor;
+    const normed = textEmbeds.normalize(2, -1);
+    embeddings.push(tensorToNested(normed)[0]);
+  }
 
-  return {
-    embeddings: tensorToNested(normed),
-    weights
-  };
+  return { embeddings, weights };
 }
 
 (async () => {
-  console.log('⏬  downloading text tower…');
-  const tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
-  const textModel = await CLIPTextModelWithProjection.from_pretrained(MODEL_ID, { device: 'cpu' });
+  env.allowLocalModels = true;
+  env.allowRemoteModels = false;
+  env.localModelPath = path.resolve(process.cwd(), 'public', 'models');
+
+  console.log('⏬  loading local MobileCLIP2-B text tower…');
+  const tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID, { local_files_only: true });
+  const textModel = await CLIPTextModelWithProjection.from_pretrained(MODEL_ID, {
+    device: 'cpu',
+    dtype: 'fp32',
+    local_files_only: true,
+  });
 
   console.log('🔧 Generating general quality embeddings...');
   const generalPositive = await generateEmbeddings(tokenizer, textModel, generalPositivePrompts);
