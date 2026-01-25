@@ -51,6 +51,21 @@ function getErrorMessage(error: unknown): string {
   return `Unknown error (${typeof error}): ${String(error)}`;
 }
 
+/* ---------- Tensor disposal utilities ---------------------------------- */
+function disposeTensor(tensor: Tensor | null | undefined): void {
+  if (tensor && typeof tensor.dispose === 'function') {
+    try {
+      tensor.dispose();
+    } catch (e) {
+      console.warn('Failed to dispose tensor:', e);
+    }
+  }
+}
+
+function disposeTensors(...tensors: (Tensor | null | undefined)[]): void {
+  tensors.forEach(disposeTensor);
+}
+
 /* ---------- Model lazy‑loading ----------------------------------------- */
 type VisionDevice = 'auto' | 'wasm' | 'webgpu' | 'cpu';
 type ModelDtype = 'fp32' | 'fp16' | 'q8' | 'q4';
@@ -79,19 +94,28 @@ function getDefaultDtype(_device: VisionDevice): ModelDtype {
  * Call this on app startup to eliminate first-image delay.
  */
 export async function preheatModel(): Promise<void> {
+  let pixelValues: Tensor | null = null;
+  let outputs: any = null;
+
   try {
     const { processor, vision_model } = await getModels();
 
     // Create a small dummy image (1x1 pixel, will be resized to 224x224 by processor)
     const dummyImage = new RawImage(new Uint8ClampedArray([128, 128, 128, 255]), 1, 1, 4);
     const image_inputs = await (processor as unknown as (images: RawImage[]) => Promise<{ pixel_values: Tensor }>)([dummyImage]);
+    pixelValues = image_inputs.pixel_values;
 
     // Run inference to trigger shader compilation
-    await vision_model({ pixel_values: image_inputs.pixel_values });
+    outputs = await vision_model({ pixel_values: pixelValues });
 
     console.log('Model preheated successfully');
   } catch (error) {
     console.warn('Model preheat failed:', getErrorMessage(error));
+  } finally {
+    disposeTensor(pixelValues);
+    if (outputs && typeof outputs.dispose === 'function') {
+      outputs.dispose();
+    }
   }
 }
 
@@ -131,36 +155,46 @@ export async function extractFeatures(photo: Photo): Promise<number[]> {
     throw new Error(`Failed to read image: ${getErrorMessage(error)}`);
   }
 
-  // Step 2: Process image
-  let pixelValues: Tensor;
+  let pixelValues: Tensor | null = null;
+  let outputs: any = null;
+  let imageEmbeds: Tensor | null = null;
+  let normalized: Tensor | null = null;
+
   try {
+    // Step 2: Process image
     const { processor } = await getModels();
     const image_inputs = await (processor as unknown as (images: RawImage[]) => Promise<{ pixel_values: Tensor }>)([image]);
     pixelValues = image_inputs.pixel_values;
-  } catch (error) {
-    throw new Error(`Failed to process image: ${getErrorMessage(error)}`);
-  }
 
-  // Step 3: Run inference (with WebGPU -> WASM fallback)
-  try {
-    const { vision_model } = await getModels();
-    const outputs = await vision_model({ pixel_values: pixelValues });
-    const imageEmbeds = (outputs.image_embeds ?? outputs.unnorm_image_features) as Tensor;
-    return Array.from(imageEmbeds.normalize(2, -1).data);
-  } catch (error) {
-    if (currentDevice === 'webgpu') {
-      console.warn('WebGPU inference failed, falling back to WASM:', getErrorMessage(error));
-      visionModelPromise = null;
-      try {
+    // Step 3: Run inference (with WebGPU -> WASM fallback)
+    try {
+      const { vision_model } = await getModels();
+      outputs = await vision_model({ pixel_values: pixelValues });
+    } catch (error) {
+      if (currentDevice === 'webgpu') {
+        console.warn('WebGPU inference failed, falling back to WASM:', getErrorMessage(error));
+        visionModelPromise = null;
         const { vision_model } = await getModels('wasm');
-        const outputs = await vision_model({ pixel_values: pixelValues });
-        const imageEmbeds = (outputs.image_embeds ?? outputs.unnorm_image_features) as Tensor;
-        return Array.from(imageEmbeds.normalize(2, -1).data);
-      } catch (wasmError) {
-        throw new Error(`Inference failed (WebGPU and WASM): ${getErrorMessage(wasmError)}`);
+        outputs = await vision_model({ pixel_values: pixelValues });
+      } else {
+        throw new Error(`Inference failed: ${getErrorMessage(error)}`);
       }
     }
-    throw new Error(`Inference failed: ${getErrorMessage(error)}`);
+
+    imageEmbeds = (outputs.image_embeds ?? outputs.unnorm_image_features) as Tensor;
+    normalized = imageEmbeds.normalize(2, -1);
+
+    // Extract data before disposal
+    const embedding = Array.from(normalized.data);
+
+    return embedding;
+  } finally {
+    // Always cleanup tensors
+    disposeTensors(pixelValues, imageEmbeds, normalized);
+    // outputs may contain other tensors - dispose if it has dispose method
+    if (outputs && typeof outputs.dispose === 'function') {
+      outputs.dispose();
+    }
   }
 }
 
@@ -226,8 +260,16 @@ export async function prepareQualityEmbeddings(): Promise<PreparedQualityEmbeddi
  * Compute cosine similarity between two tensors.
  */
 async function cosineSimilarity(a: Tensor, b: Tensor): Promise<number> {
-  const result = await matmul(a, b.transpose(1, 0));
-  return (result.data as Float32Array)[0];
+  let transposed: Tensor | null = null;
+  let result: Tensor | null = null;
+
+  try {
+    transposed = b.transpose(1, 0);
+    result = await matmul(a, transposed);
+    return (result.data as Float32Array)[0];
+  } finally {
+    disposeTensors(transposed, result);
+  }
 }
 
 /**
@@ -287,87 +329,97 @@ export async function analyzeImage(
   let hasFace = false;
   let detectedCategory: PhotoCategory = 'general';
 
-  if (embedding && embedding.length > 0 && qualityEmbeddings && qualityEmbeddings.dimensions.length > 0) {
-    try {
-      const imageEmbedding = new Tensor(
-        'float32',
-        Float32Array.from(embedding),
-        [1, embedding.length]
-      );
+  let imageEmbedding: Tensor | null = null;
 
-      const { categories, dimensions, calibration } = qualityEmbeddings;
+  try {
+    if (embedding && embedding.length > 0 && qualityEmbeddings && qualityEmbeddings.dimensions.length > 0) {
+      try {
+        imageEmbedding = new Tensor(
+          'float32',
+          Float32Array.from(embedding),
+          [1, embedding.length]
+        );
 
-      // Step 1: Detect photo categories
-      const categoryConfidences = await detectCategories(imageEmbedding, categories);
+        const { categories, dimensions, calibration } = qualityEmbeddings;
 
-      // Find the dominant category (excluding 'general')
-      let maxConfidence = 0;
-      for (const [cat, conf] of categoryConfidences) {
-        if (cat !== 'general' && conf > maxConfidence) {
-          maxConfidence = conf;
-          detectedCategory = cat;
-        }
-      }
+        // Step 1: Detect photo categories
+        const categoryConfidences = await detectCategories(imageEmbedding, categories);
 
-      // If no specific category is confident enough, use 'general'
-      if (maxConfidence < calibration.categoryThreshold) {
-        detectedCategory = 'general';
-      }
-
-      // Detect face presence from category
-      hasFace = detectedCategory === 'face' || detectedCategory === 'group';
-
-      // Step 2: Calculate quality score using applicable dimensions
-      let weightedSum = 0;
-      let totalWeight = 0;
-
-      for (const dimension of dimensions) {
-        // Check if this dimension applies to the detected category
-        // Also always include dimensions for 'general' category
-        const applies = dimension.categories.includes(detectedCategory) ||
-          dimension.categories.includes('general');
-
-        if (!applies) continue;
-
-        // Calculate dimension-specific category weight
-        // If dimension is specific to detected category, full weight
-        // If dimension is general-only, reduce weight for specific categories
-        let effectiveWeight = dimension.weight;
-        if (!dimension.categories.includes(detectedCategory) && detectedCategory !== 'general') {
-          effectiveWeight *= 0.5; // General dimensions get reduced weight for specific categories
+        // Find the dominant category (excluding 'general')
+        let maxConfidence = 0;
+        for (const [cat, conf] of categoryConfidences) {
+          if (cat !== 'general' && conf > maxConfidence) {
+            maxConfidence = conf;
+            detectedCategory = cat;
+          }
         }
 
-        const dimScore = await calculateDimensionScore(imageEmbedding, dimension, calibration.temperature);
-        weightedSum += dimScore * effectiveWeight;
-        totalWeight += effectiveWeight;
+        // If no specific category is confident enough, use 'general'
+        if (maxConfidence < calibration.categoryThreshold) {
+          detectedCategory = 'general';
+        }
+
+        // Detect face presence from category
+        hasFace = detectedCategory === 'face' || detectedCategory === 'group';
+
+        // Step 2: Calculate quality score using applicable dimensions
+        let weightedSum = 0;
+        let totalWeight = 0;
+
+        for (const dimension of dimensions) {
+          // Check if this dimension applies to the detected category
+          // Also always include dimensions for 'general' category
+          const applies = dimension.categories.includes(detectedCategory) ||
+            dimension.categories.includes('general');
+
+          if (!applies) continue;
+
+          // Calculate dimension-specific category weight
+          // If dimension is specific to detected category, full weight
+          // If dimension is general-only, reduce weight for specific categories
+          let effectiveWeight = dimension.weight;
+          if (!dimension.categories.includes(detectedCategory) && detectedCategory !== 'general') {
+            effectiveWeight *= 0.5; // General dimensions get reduced weight for specific categories
+          }
+
+          const dimScore = await calculateDimensionScore(imageEmbedding, dimension, calibration.temperature);
+          weightedSum += dimScore * effectiveWeight;
+          totalWeight += effectiveWeight;
+        }
+
+        // Normalize to 0-100 range
+        // dimScore is already 0-1 from sigmoid, so weighted average is 0-1
+        const normalizedScore = totalWeight > 0 ? weightedSum / totalWeight : 0.5;
+        quality = Math.max(0, Math.min(100, Math.round(normalizedScore * 100)));
+
+      } catch (error) {
+        console.error("Error calculating image quality:", error);
+        quality = 0;
       }
-
-      // Normalize to 0-100 range
-      // dimScore is already 0-1 from sigmoid, so weighted average is 0-1
-      const normalizedScore = totalWeight > 0 ? weightedSum / totalWeight : 0.5;
-      quality = Math.max(0, Math.min(100, Math.round(normalizedScore * 100)));
-
-    } catch (error) {
-      console.error("Error calculating image quality:", error);
+    } else if (!qualityEmbeddings || qualityEmbeddings.dimensions.length === 0) {
+      console.warn("Quality embeddings not loaded or empty. Run 'npm run generate-embeddings' to generate them.");
+      quality = 50; // Default to neutral score
+    } else {
+      console.warn("Embedding not provided, setting quality to 0.");
       quality = 0;
     }
-  } else if (!qualityEmbeddings || qualityEmbeddings.dimensions.length === 0) {
-    console.warn("Quality embeddings not loaded or empty. Run 'npm run generate-embeddings' to generate them.");
-    quality = 50; // Default to neutral score
-  } else {
-    console.warn("Embedding not provided, setting quality to 0.");
-    quality = 0;
+
+    // EXIF reading - create separate scope for ArrayBuffer
+    let metadata: PhotoMetadata;
+    {
+      const arrayBuffer = await photo.file.arrayBuffer();
+      const exifTags = ExifReader.load(arrayBuffer);
+      const dateFromExif = exifTags?.['DateTimeOriginal']?.description || exifTags?.['DateTime']?.description;
+      metadata = {
+        captureDate: new Date(dateFromExif?.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3") || photo.file.lastModified),
+      };
+      // arrayBuffer goes out of scope here and can be GC'd
+    }
+
+    return { quality, metadata, hasFace, detectedCategory };
+  } finally {
+    disposeTensor(imageEmbedding);
   }
-
-  const arrayBuffer = await photo.file.arrayBuffer();
-  const exifTags = ExifReader.load(arrayBuffer);
-
-  const dateFromExif = exifTags?.['DateTimeOriginal']?.description || exifTags?.['DateTime']?.description
-
-  const metadata: PhotoMetadata = {
-    captureDate: new Date(dateFromExif?.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3") || photo.file.lastModified),
-  };
-  return { quality, metadata, hasFace, detectedCategory };
 }
 
 /* ---------- Union-Find data structure ---------------------------------- */
@@ -459,84 +511,97 @@ export async function groupSimilarPhotos(
 
   const n = photosWithEmbeddings.length;
   const embeddingDim = photosWithEmbeddings[0].embedding!.length;
-  const embeddingsTensor = new Tensor(
-    'float32',
-    Float32Array.from(photosWithEmbeddings.flatMap(p => p.embedding!)),
-    [n, embeddingDim]
-  );
-  const similarityMatrix = await matmul(embeddingsTensor, embeddingsTensor.transpose(1, 0));
-  const similarities = similarityMatrix.data as Float32Array;
 
-  // Use Union-Find for proper connected-component clustering
-  const uf = new UnionFind(n);
-  const pairSimilarities = new Map<string, number>();
+  let embeddingsTensor: Tensor | null = null;
+  let transposed: Tensor | null = null;
+  let similarityMatrix: Tensor | null = null;
 
-  for (let i = 0; i < n; i++) {
-    const photoA = photosWithEmbeddings[i];
-    for (let j = i + 1; j < n; j++) {
-      const photoB = photosWithEmbeddings[j];
+  try {
+    embeddingsTensor = new Tensor(
+      'float32',
+      Float32Array.from(photosWithEmbeddings.flatMap(p => p.embedding!)),
+      [n, embeddingDim]
+    );
 
-      const threshold = getEffectiveThreshold(
-        photoA.metadata?.captureDate,
-        photoB.metadata?.captureDate,
-        similarityThreshold
-      );
+    transposed = embeddingsTensor.transpose(1, 0);
+    similarityMatrix = await matmul(embeddingsTensor, transposed);
+    const similarities = similarityMatrix.data as Float32Array;
 
-      if (threshold === Infinity) continue;
+    // Use Union-Find for proper connected-component clustering
+    const uf = new UnionFind(n);
+    const pairSimilarities = new Map<string, number>();
 
-      const similarity = similarities[i * n + j];
-      if (similarity >= threshold) {
-        uf.union(i, j);
-        const key = `${Math.min(i, j)}-${Math.max(i, j)}`;
-        pairSimilarities.set(key, similarity);
-      }
-    }
-  }
+    for (let i = 0; i < n; i++) {
+      const photoA = photosWithEmbeddings[i];
+      for (let j = i + 1; j < n; j++) {
+        const photoB = photosWithEmbeddings[j];
 
-  // Extract groups from Union-Find
-  const ufGroups = uf.getGroups();
-  const groups: PhotoGroup[] = [];
-  const uniquePhotos: Photo[] = [...photosWithoutEmbeddings];
+        const threshold = getEffectiveThreshold(
+          photoA.metadata?.captureDate,
+          photoB.metadata?.captureDate,
+          similarityThreshold
+        );
 
-  for (const indices of ufGroups.values()) {
-    if (indices.length > 1) {
-      const groupPhotos = indices.map(idx => photosWithEmbeddings[idx]);
+        if (threshold === Infinity) continue;
 
-      // Calculate minimum similarity within the group
-      let minSimilarity = 1.0;
-      for (let i = 0; i < indices.length; i++) {
-        for (let j = i + 1; j < indices.length; j++) {
-          const key = `${Math.min(indices[i], indices[j])}-${Math.max(indices[i], indices[j])}`;
-          const sim = pairSimilarities.get(key);
-          if (sim !== undefined) {
-            minSimilarity = Math.min(minSimilarity, sim);
-          }
+        const similarity = similarities[i * n + j];
+        if (similarity >= threshold) {
+          uf.union(i, j);
+          const key = `${Math.min(i, j)}-${Math.max(i, j)}`;
+          pairSimilarities.set(key, similarity);
         }
       }
-
-      const sortedPhotos = [...groupPhotos].sort((a, b) => (b.quality ?? 0) - (a.quality ?? 0));
-      const groupDate = sortedPhotos[0].metadata?.captureDate ?? new Date();
-      groups.push({
-        id: `${sortedPhotos[0].id}-group`,
-        title: getGroupTitle(sortedPhotos[0]),
-        date: groupDate,
-        photos: sortedPhotos,
-        similarity: minSimilarity,
-        similarityThreshold,
-      });
-    } else {
-      uniquePhotos.push(photosWithEmbeddings[indices[0]]);
     }
-  }
 
-  // Sort results by date
-  groups.sort((a, b) => b.date.getTime() - a.date.getTime());
-  uniquePhotos.sort((a, b) => {
-    const dateA = a.metadata?.captureDate?.getTime() ?? 0;
-    const dateB = b.metadata?.captureDate?.getTime() ?? 0;
-    return dateB - dateA;
-  });
-  return { groups, uniquePhotos };
+    // Extract groups from Union-Find
+    const ufGroups = uf.getGroups();
+    const groups: PhotoGroup[] = [];
+    const uniquePhotos: Photo[] = [...photosWithoutEmbeddings];
+
+    for (const indices of ufGroups.values()) {
+      if (indices.length > 1) {
+        const groupPhotos = indices.map(idx => photosWithEmbeddings[idx]);
+
+        // Calculate minimum similarity within the group
+        let minSimilarity = 1.0;
+        for (let i = 0; i < indices.length; i++) {
+          for (let j = i + 1; j < indices.length; j++) {
+            const key = `${Math.min(indices[i], indices[j])}-${Math.max(indices[i], indices[j])}`;
+            const sim = pairSimilarities.get(key);
+            if (sim !== undefined) {
+              minSimilarity = Math.min(minSimilarity, sim);
+            }
+          }
+        }
+
+        const sortedPhotos = [...groupPhotos].sort((a, b) => (b.quality ?? 0) - (a.quality ?? 0));
+        const groupDate = sortedPhotos[0].metadata?.captureDate ?? new Date();
+        groups.push({
+          id: `${sortedPhotos[0].id}-group`,
+          title: getGroupTitle(sortedPhotos[0]),
+          date: groupDate,
+          photos: sortedPhotos,
+          similarity: minSimilarity,
+          similarityThreshold,
+        });
+      } else {
+        uniquePhotos.push(photosWithEmbeddings[indices[0]]);
+      }
+    }
+
+    // Sort results by date
+    groups.sort((a, b) => b.date.getTime() - a.date.getTime());
+    uniquePhotos.sort((a, b) => {
+      const dateA = a.metadata?.captureDate?.getTime() ?? 0;
+      const dateB = b.metadata?.captureDate?.getTime() ?? 0;
+      return dateB - dateA;
+    });
+
+    return { groups, uniquePhotos };
+  } finally {
+    // Critical: dispose O(n²) similarity matrix!
+    disposeTensors(embeddingsTensor, transposed, similarityMatrix);
+  }
 }
 
 /* ---------- Incremental grouping --------------------------------------- */
