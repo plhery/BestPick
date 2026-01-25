@@ -489,60 +489,84 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
           type: "image/jpeg",
           quality: 0.8,
         })) as Blob], file.name.replace(/\.hei[c|f]$/i, '.jpg'), { type: 'image/jpeg' }) : file;
-        const url = URL.createObjectURL(nonHeicFile);
-        const basicPhoto = {
+
+        // Generate efficient thumbnail (224px for CLIP)
+        // This is the ONLY image data we will keep in memory!
+        let thumbnailBlob: Blob;
+        try {
+          thumbnailBlob = await generateThumbnail(nonHeicFile, 224);
+        } catch (e) {
+          console.warn("Failed to generate thumbnail, falling back to original file (dangerous for memory)", e);
+          thumbnailBlob = nonHeicFile;
+        }
+
+        const thumbnailUrl = URL.createObjectURL(thumbnailBlob);
+
+        // Create a temporary object for processing that HAS the file references
+        // We need the original file for EXIF data in analyzeImage
+        const processingPhoto: Photo = {
           id,
           file,
           nonHeicFile,
-          url,
-          thumbnailUrl: url,
+          url: thumbnailUrl, // Use thumbnail URL for CLIP/display
+          thumbnailUrl: thumbnailUrl,
           name: file.name,
           size: file.size,
           type: file.type,
           dateCreated: new Date(file.lastModified),
-          selected: false, // Will be determined by reducer later
+          selected: false,
         };
 
 
-        // 2. Extract features (embedding)
+        // 2. Extract features (embedding) - Uses the thumbnail URL from processingPhoto
         updateProgress(i + 1, totalFiles, 'extracting', file.name);
         let embedding: number[] | undefined = undefined;
         try {
-          embedding = await extractFeatures(basicPhoto as Photo);
+          embedding = await extractFeatures(processingPhoto);
         } catch (error) {
-          console.error(`Failed to extract features for ${basicPhoto.name}:`, error);
+          console.error(`Failed to extract features for ${processingPhoto.name}:`, error);
         }
 
 
-        // 3. Analyze image (quality and metadata)
+        // 3. Analyze image (quality and metadata) - Uses processingPhoto.file for EXIF
         updateProgress(i + 1, totalFiles, 'scoring', file.name);
-        let tempAnalysisResult: { quality: number; metadata: PhotoMetadata }; // Use PhotoMetadata which allows undefined captureDate
+        let tempAnalysisResult: { quality: number; metadata: PhotoMetadata };
         try {
           tempAnalysisResult = await analyzeImage(
-            basicPhoto,
+            processingPhoto,
             embedding,
-            qualityEmbeddings // Use pre-calculated embeddings
+            qualityEmbeddings
           );
         } catch (error) {
-          console.error(`Failed to analyze image ${basicPhoto.name}:`, error);
-          tempAnalysisResult = { quality: 0, metadata: {} }; // Default on error
+          console.error(`Failed to analyze image ${processingPhoto.name}:`, error);
+          tempAnalysisResult = { quality: 0, metadata: {} };
         }
 
-        // Ensure analysisResult has the expected structure with a non-undefined captureDate
         const analysisResult = {
           quality: tempAnalysisResult.quality,
           metadata: {
             ...tempAnalysisResult.metadata,
-            captureDate: tempAnalysisResult.metadata.captureDate ?? basicPhoto.dateCreated
+            captureDate: tempAnalysisResult.metadata.captureDate ?? processingPhoto.dateCreated
           }
         };
 
-        // 4. Combine into final Photo object
+        // 4. Combine into final Photo object - CRITICAL: DO NOT INCLUDE FILE REFS
+        // We specifically omit 'file' and 'nonHeicFile' to allow GC
         const newPhoto: Photo = {
-          ...basicPhoto,
+          id: processingPhoto.id,
+          url: processingPhoto.url,
+          thumbnailUrl: processingPhoto.thumbnailUrl,
+          name: processingPhoto.name,
+          size: processingPhoto.size,
+          type: processingPhoto.type,
+          dateCreated: processingPhoto.dateCreated,
+          selected: false,
           quality: analysisResult.quality,
-          metadata: analysisResult.metadata, // Now analysisResult.metadata is guaranteed to match Photo['metadata'] structure
+          metadata: analysisResult.metadata,
           embedding: embedding,
+          // Explicitly undefined to ensure no reference is held
+          file: undefined,
+          nonHeicFile: undefined
         };
 
         // Add to batch instead of dispatching immediately

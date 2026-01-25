@@ -1,7 +1,7 @@
 export interface Photo {
   id: string;
-  file: File;
-  nonHeicFile: File;
+  file?: File;
+  nonHeicFile?: File;
   url: string;
   thumbnailUrl: string;
   name: string;

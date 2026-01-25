@@ -162,7 +162,15 @@ export async function extractFeatures(photo: Photo): Promise<number[]> {
   // Step 1: Read image
   let image: RawImage;
   try {
-    image = await RawImage.read(photo.nonHeicFile);
+    // If we have a URL (which we should for optimized photos), use it
+    if (photo.url) {
+      image = await RawImage.fromURL(photo.url);
+    } else if (photo.nonHeicFile) {
+      // Fallback for cases where we still have the file
+      image = await RawImage.read(photo.nonHeicFile);
+    } else {
+      throw new Error("No image source available");
+    }
   } catch (error) {
     throw new Error(`Failed to read image: ${getErrorMessage(error)}`);
   }
@@ -330,6 +338,64 @@ async function calculateDimensionScore(
   return 1 / (1 + Math.exp(-temperature * diff));
 }
 
+/* ---------- Thumbnail Generation ------------------------------------- */
+export async function generateThumbnail(file: File, maxSize: number = 224): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > maxSize) {
+          height = Math.round((height * maxSize) / width);
+          width = maxSize;
+        }
+      } else {
+        if (height > maxSize) {
+          width = Math.round((width * maxSize) / height);
+          height = maxSize;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      if (!ctx) {
+        reject(new Error('Failed to get canvas context'));
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Failed to create blob'));
+          }
+        },
+        'image/jpeg',
+        0.8
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image'));
+    };
+
+    img.src = url;
+  });
+}
+
+
 /* ---------- Quality + metadata analysis -------------------------------- */
 export async function analyzeImage(
   photo: Photo,
@@ -416,16 +482,37 @@ export async function analyzeImage(
       quality = 0;
     }
 
-    // EXIF reading - create separate scope for ArrayBuffer
+    // EXIF reading - optimized to read only first 128KB
     let metadata: PhotoMetadata;
     {
-      const arrayBuffer = await photo.file.arrayBuffer();
-      const exifTags = ExifReader.load(arrayBuffer);
-      const dateFromExif = exifTags?.['DateTimeOriginal']?.description || exifTags?.['DateTime']?.description;
-      metadata = {
-        captureDate: new Date(dateFromExif?.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3") || photo.file.lastModified),
-      };
-      // arrayBuffer goes out of scope here and can be GC'd
+      try {
+        let arrayBuffer: ArrayBuffer;
+        // If we have the original file, use it but slice it
+        if (photo.file) {
+          // Read first 128KB which should contain EXIF
+          const slice = photo.file.slice(0, 128 * 1024);
+          arrayBuffer = await slice.arrayBuffer();
+        } else {
+          // If we only have URL (already optimized), we might have lost original EXIF
+          // But metadata should have been extracted BEFORE optimization.
+          // If we are here properly, we shouldn't be re-analyzing optimized photos for EXIF usually.
+          // Fallback: try to fetch the URL if it's a blob url
+          const response = await fetch(photo.url);
+          arrayBuffer = await response.arrayBuffer();
+        }
+
+        const exifTags = ExifReader.load(arrayBuffer);
+        const dateFromExif = exifTags?.['DateTimeOriginal']?.description || exifTags?.['DateTime']?.description;
+        const lastModified = photo.file ? photo.file.lastModified : Date.now();
+
+        metadata = {
+          captureDate: new Date(dateFromExif?.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3") || lastModified),
+        };
+      } catch (e) {
+        console.warn("Failed to read EXIF", e);
+        const lastModified = photo.file ? photo.file.lastModified : Date.now();
+        metadata = { captureDate: new Date(lastModified) };
+      }
     }
 
     return { quality, metadata, hasFace, detectedCategory };
