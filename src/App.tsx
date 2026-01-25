@@ -14,9 +14,9 @@ import { preheatModel } from './utils/imageAnalysis';
 const stepLabels: Record<ProcessingStep, { label: string; icon: React.ReactNode }> = {
   'idle': { label: 'Preparing...', icon: <Loader2 className="animate-spin h-5 w-5" /> },
   'converting': { label: 'Converting image...', icon: <RefreshCw className="animate-spin h-5 w-5" /> },
-  'extracting': { label: 'Extracting features...', icon: <ImageIcon className="h-5 w-5" /> },
-  'scoring': { label: 'Scoring quality...', icon: <Sparkles className="h-5 w-5" /> },
-  'grouping': { label: 'Grouping similar photos...', icon: <Layers className="h-5 w-5" /> },
+  'extracting': { label: 'Analysing visuals...', icon: <ImageIcon className="h-5 w-5" /> },
+  'scoring': { label: 'Evaluating quality...', icon: <Sparkles className="h-5 w-5" /> },
+  'grouping': { label: 'Finding matches...', icon: <Layers className="h-5 w-5" /> },
 };
 
 const LoadingOverlay: React.FC = () => {
@@ -28,47 +28,62 @@ const LoadingOverlay: React.FC = () => {
   const percentage = progress ? Math.round((progress.currentIndex / progress.totalCount) * 100) : 0;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 backdrop-blur-sm">
-      <div className="flex flex-col items-center text-white max-w-md w-full mx-4 bg-gray-800 rounded-2xl p-8 shadow-2xl">
-        <Loader2 className="animate-spin h-12 w-12 mb-4 text-blue-400" />
+    <div className="fixed inset-0 bg-surface-950/80 backdrop-blur-md flex items-center justify-center z-50 animate-in fade-in duration-300">
+      <div className="glass-panel text-white max-w-md w-full mx-4 rounded-3xl p-10 shadow-2xl border-white/10 relative overflow-hidden">
 
-        {isPreparingEmbeddings ? (
-          <>
-            <p className="text-lg font-semibold mb-2">Loading AI Model...</p>
-            <p className="text-sm text-gray-400">This only happens once</p>
-          </>
-        ) : progress ? (
-          <>
-            <p className="text-lg font-semibold mb-1">Processing Photos</p>
-            <p className="text-2xl font-bold text-blue-400 mb-4">
-              {progress.currentIndex} / {progress.totalCount}
-            </p>
+        {/* Background Glow */}
+        <div className="absolute top-0 right-0 -mt-10 -mr-10 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-0 -mb-10 -ml-10 w-32 h-32 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
 
-            {/* Progress bar */}
-            <div className="w-full bg-gray-700 rounded-full h-3 mb-4 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full transition-all duration-300 ease-out"
-                style={{ width: `${percentage}%` }}
-              />
-            </div>
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="mb-6 relative">
+            <div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse" />
+            <Loader2 className="animate-spin h-12 w-12 text-blue-400 relative z-10" />
+          </div>
 
-            {/* Step indicator */}
-            <div className="flex items-center gap-2 text-sm text-gray-300 mb-2">
-              {stepInfo.icon}
-              <span>{stepInfo.label}</span>
-            </div>
+          {isPreparingEmbeddings ? (
+            <>
+              <p className="text-xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-200 to-indigo-200">
+                Warming up AI Model...
+              </p>
+              <p className="text-sm text-slate-400">This happens locally on your device</p>
+            </>
+          ) : progress ? (
+            <>
+              <p className="text-lg font-semibold mb-1 text-slate-200">Processing Photos</p>
+              <div className="flex items-baseline gap-1 mb-6">
+                <span className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-400">
+                  {percentage}%
+                </span>
+                <span className="text-slate-500 text-sm">complete</span>
+              </div>
 
-            {/* Current file name */}
-            <p className="text-xs text-gray-500 truncate max-w-full" title={progress.currentFileName}>
-              {progress.currentFileName}
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="text-lg font-semibold">Processing Photos...</p>
-            <p className="text-sm text-gray-400">This may take a moment.</p>
-          </>
-        )}
+              {/* Progress bar */}
+              <div className="w-full bg-slate-800/50 rounded-full h-2 mb-6 overflow-hidden border border-white/5">
+                <div
+                  className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-500 rounded-full transition-all duration-300 ease-out relative"
+                  style={{ width: `${percentage}%` }}
+                >
+                  <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                </div>
+              </div>
+
+              {/* Step indicator */}
+              <div className="flex items-center gap-3 text-sm text-slate-300 bg-slate-800/50 px-4 py-2 rounded-full border border-white/5">
+                <span className="text-blue-400">{stepInfo.icon}</span>
+                <span>{stepInfo.label}</span>
+              </div>
+
+              <p className="mt-4 text-xs text-slate-500 truncate max-w-[200px]" title={progress.currentFileName}>
+                {progress.currentFileName}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-semibold">Preparing...</p>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -85,37 +100,54 @@ const MainContent: React.FC = () => {
   }, []);
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-900 text-white">
+    <div className="flex flex-col min-h-screen text-slate-200">
       <Header />
 
       {isLoading && <LoadingOverlay />}
 
-      <main className={`flex-1 container mx-auto py-8 ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
+      <main className={`flex-1 container mx-auto px-4 py-8 md:py-12 max-w-[1600px] ${isLoading ? 'opacity-30 pointer-events-none blur-sm transition-all duration-500' : 'transition-all duration-500'}`}>
         {!hasPhotos ? (
-          <>
-            <h1 className="text-3xl font-bold mb-6 px-4">Organize Your Photos</h1>
-            <UploadArea />
-            <div className="mt-8 px-4 text-center">
-              <img
-                src={previewImageUrl}
-                alt="BestPick App Preview"
-                className="max-w-full md:max-w-4xl mx-auto rounded-lg shadow-lg border border-gray-700"
-              />
+          <div className="max-w-4xl mx-auto animate-fade-in-up">
+            <div className="text-center mb-10">
+              <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-100 via-white to-indigo-100 tracking-tight">
+                Organize Your Photos
+              </h1>
+              <p className="text-slate-400 text-lg max-w-2xl mx-auto">
+                Automatically group similar shots and find the best ones using AI.
+                <br className="hidden md:block" /> Private, secure, and fast.
+              </p>
             </div>
-          </>
+
+            <UploadArea />
+
+            <div className="mt-16 text-center opacity-80 hover:opacity-100 transition-opacity duration-500">
+              <div className="glass-panel p-2 rounded-2xl inline-block">
+                <img
+                  src={previewImageUrl}
+                  alt="BestPick App Preview"
+                  className="max-w-full md:max-w-4xl mx-auto rounded-xl shadow-2xl border border-white/5"
+                />
+              </div>
+            </div>
+          </div>
         ) : (
-          <>
-            <div className="mb-8 px-4">
+          <div className="animate-fade-in-up">
+            <div className="mb-10">
               <UploadArea />
             </div>
             <PhotoGroups />
             <UniquePhotos />
-          </>
+          </div>
         )}
       </main>
 
-      <footer className="bg-gray-900 border-t border-gray-800 py-4 px-6 text-center text-gray-500 text-sm">
-        <p>BestPick - Declutter your photo collections</p>
+      <footer className="mt-auto py-8 border-t border-white/5 text-center">
+        <div className="flex items-center justify-center gap-2 mb-2">
+          <div className="h-px w-8 bg-gradient-to-r from-transparent to-slate-700" />
+          <ImageIcon size={16} className="text-slate-600" />
+          <div className="h-px w-8 bg-gradient-to-l from-transparent to-slate-700" />
+        </div>
+        <p className="text-slate-500 text-sm">BestPick &bull; AI-Powered Photo Organization</p>
       </footer>
     </div>
   );

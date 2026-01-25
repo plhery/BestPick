@@ -1,7 +1,7 @@
 import React from 'react';
 import { usePhotoContext } from '../context/usePhotoContext';
 import PhotoItem from './PhotoItem';
-import { CheckCircle, XCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, Layers } from 'lucide-react';
 
 interface PhotoGroupProps {
   groupId: string;
@@ -33,35 +33,44 @@ const PhotoGroup: React.FC<PhotoGroupProps> = ({
     deselectAllInGroup(groupId);
   };
 
-  // Photos are already sorted by quality in the reducer/grouping logic
-
   return (
-    <div className="mb-8 bg-gray-800 rounded-lg overflow-hidden">
-      <div className="p-4 flex items-center justify-between border-b border-gray-700">
-        <div>
-          <h3 className="text-lg font-medium text-white">{title}</h3>
-          <p className="text-gray-400 text-sm">Similarity: {(similarity * 100).toFixed(0)}%</p>
+    <div className="mb-8 glass-panel rounded-2xl overflow-hidden transition-all duration-300 hover:border-white/20">
+      <div className="p-4 md:p-5 flex items-center justify-between border-b border-white/5 bg-white/5 backdrop-blur-sm">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-blue-500/10 hidden md:block">
+            <Layers size={20} className="text-blue-400" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-white tracking-tight">{title}</h3>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/20">
+                {(similarity * 100).toFixed(0)}% Match
+              </span>
+              <span className="text-xs text-slate-500">{photos.length} photos</span>
+            </div>
+          </div>
         </div>
+
         <div className="flex gap-2">
           <button
             onClick={handleSelectAll}
-            className="p-2 rounded-full hover:bg-gray-700 transition-colors duration-200"
-            title="Select All in Group"
+            className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-green-400 transition-colors"
+            title="Keep All"
           >
-            <CheckCircle size={20} className="text-blue-400" />
+            <CheckCircle2 size={20} />
           </button>
           <button
             onClick={handleDeselectAll}
-            className="p-2 rounded-full hover:bg-gray-700 transition-colors duration-200"
-            title="Deselect All in Group"
+            className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-red-400 transition-colors"
+            title="Discard All"
           >
-            <XCircle size={20} className="text-blue-400" />
+            <XCircle size={20} />
           </button>
         </div>
       </div>
 
-      <div className="p-4 overflow-x-auto">
-        <div className="flex space-x-4 pb-2">
+      <div className="p-4 md:p-6 overflow-x-auto custom-scrollbar">
+        <div className="flex space-x-4 pb-2 min-w-min">
           {photos.map((photo, index) => (
             <PhotoItem
               key={photo.id}
@@ -89,9 +98,19 @@ const PhotoGroups: React.FC = () => {
   }
 
   return (
-    <div className="mb-8">
-      <h2 className="text-xl font-semibold mb-4 text-white px-4">Similar Photo Groups</h2>
-      <div className="space-y-6 px-4">
+    <div className="mb-12 animate-fade-in-up">
+      <div className="flex items-center justify-between mb-6 px-4 md:px-0">
+        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-400">
+            Similar Groups
+          </span>
+          <span className="text-sm font-normal text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded-md border border-white/5">
+            {groups.length} found
+          </span>
+        </h2>
+      </div>
+
+      <div className="space-y-6 px-4 md:px-0">
         {groups.map(group => (
           <PhotoGroup
             key={group.id}
