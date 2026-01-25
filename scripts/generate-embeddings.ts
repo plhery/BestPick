@@ -347,7 +347,9 @@ const qualityDimensions: QualityDimension[] = [
 ];
 
 // Use the same model as imageAnalysis.ts (from Hugging Face)
-const MODEL_ID = 'plhery/mobileclip2-b-onnx';
+const MODEL_ID = 'plhery/mobileclip2-onnx';
+// Available model sizes: 's0', 's2', 'b', 'l14'
+const MODEL_SIZE = 's2';
 
 function tensorToArray(t: Tensor): number[] {
   return Array.from(t.data as Float32Array);
@@ -387,11 +389,12 @@ async function generateAverageEmbedding(
 }
 
 (async () => {
-  console.log('⏬  Loading MobileCLIP2-B text tower from Hugging Face...');
+  console.log(`⏬  Loading MobileCLIP2-${MODEL_SIZE.toUpperCase()} text tower from Hugging Face...`);
   const tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
   const textModel = await CLIPTextModelWithProjection.from_pretrained(MODEL_ID, {
     device: 'cpu',
     dtype: 'fp32',
+    model_file_name: `${MODEL_SIZE}/text_model`,
   });
 
   // Generate category detection embeddings

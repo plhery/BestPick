@@ -71,9 +71,6 @@ function getDefaultDevice(): VisionDevice {
 }
 
 function getDefaultDtype(_device: VisionDevice): ModelDtype {
-  // fp16 conversion for MobileCLIP2-B causes type mismatches in attention layers.
-  // The model architecture has complex type dependencies that onnxconverter-common
-  // can't handle properly. Use fp32 - WebGPU still provides good acceleration.
   return 'fp32';
 }
 
@@ -98,7 +95,9 @@ export async function preheatModel(): Promise<void> {
   }
 }
 
-const HUGGINGFACE_MODEL_ID = 'plhery/mobileclip2-b-onnx';
+const HUGGINGFACE_MODEL_ID = 'plhery/mobileclip2-onnx';
+// Available model sizes: 's0' (43MB), 's2' (136MB), 'b' (330MB), 'l14' (1.1GB)
+const MODEL_SIZE = 's2';
 
 async function getModels(deviceOverride?: VisionDevice) {
   const device = deviceOverride ?? currentDevice ?? getDefaultDevice();
@@ -108,11 +107,14 @@ async function getModels(deviceOverride?: VisionDevice) {
     currentDevice = device;
     currentDtype = dtype;
 
-    console.log(`Loading model with device=${device}, dtype=${dtype}`);
-    processorPromise = processorPromise || AutoProcessor.from_pretrained(HUGGINGFACE_MODEL_ID);
+    console.log(`Loading model ${MODEL_SIZE} with device=${device}, dtype=${dtype}`);
+    processorPromise = processorPromise || AutoProcessor.from_pretrained(HUGGINGFACE_MODEL_ID, {
+      config_file_name: `${MODEL_SIZE}/preprocessor_config.json`,
+    });
     visionModelPromise = CLIPVisionModelWithProjection.from_pretrained(HUGGINGFACE_MODEL_ID, {
       device,
       dtype,
+      model_file_name: `${MODEL_SIZE}/vision_model`,
     });
   }
 

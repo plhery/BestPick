@@ -30,10 +30,10 @@ The app uses React Context with `useReducer` for state management ([src/context/
 The core ML functionality is in [src/utils/imageAnalysis.ts](src/utils/imageAnalysis.ts):
 
 #### Model Loading
-- Uses **MobileCLIP2-B** vision and text models from Hugging Face Transformers.js
-- Models are served locally from `public/models/mobileclip2-b/`
+- Uses **MobileCLIP2** vision and text models from Hugging Face (`plhery/mobileclip2-onnx`)
+- Available model sizes: S0 (43MB), S2 (136MB, default), B (330MB), L-14 (1.1GB)
 - Lazy loads models on first use with device detection (WebGPU → WASM → CPU fallback)
-- Environment configured with `env.allowLocalModels = true` and `env.allowRemoteModels = false`
+- Model size configurable via `MODEL_SIZE` constant in imageAnalysis.ts
 
 #### Feature Extraction
 - `extractFeatures(photo)` - Generates normalized 512-dimensional embeddings from images
@@ -80,7 +80,7 @@ Progress updates via `setProcessingProgress()` are displayed in the UI overlay.
 
 The [scripts/generate-embeddings.ts](scripts/generate-embeddings.ts) script:
 
-- Loads MobileCLIP2-B text model from `public/models/`
+- Loads MobileCLIP2 text model from HuggingFace (`plhery/mobileclip2-onnx`)
 - Generates embeddings for weighted prompt sets (general and face, positive and negative)
 - Outputs to [src/data/qualityEmbeds.json](src/data/qualityEmbeds.json) with structure:
   ```json
@@ -112,7 +112,7 @@ The [scripts/generate-embeddings.ts](scripts/generate-embeddings.ts) script:
 ## Important Notes
 
 - All ML processing runs client-side; no backend required
-- Models must be in `public/models/mobileclip2-b/` directory
+- Models are loaded from HuggingFace (`plhery/mobileclip2-onnx`) on first use
 - Quality embeddings are pre-generated; run `npm run generate-embeddings` after changing prompts in the script
 - The app creates object URLs for images; these are not revoked during runtime to maintain display
 - Auto-selection logic: Selects best photo (highest quality) from each group + all unique photos
