@@ -322,28 +322,56 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
   const [processingProgress, setProcessingProgress] = useState<ProcessingProgress | null>(null);
   const [similarityThreshold, setSimilarityThreshold] = useState(0.90);
 
+  // Ref to track if re-grouping is in progress (prevents race conditions on mobile)
+  const isRegroupingRef = useRef(false);
+
+  // Detect mobile device for longer debounce
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
   // Debounced regrouping when threshold changes
   useEffect(() => {
+    let isCancelled = false;
+
+    // Longer debounce on mobile to reduce memory pressure
+    const debounceTime = isMobile ? 1000 : 500;
+
     const timer = setTimeout(async () => {
       const currentPhotos = stateRef.current.photos;
       if (currentPhotos.length === 0) return;
 
+      // Skip if already re-grouping to prevent multiple simultaneous operations
+      // This prevents memory spikes on mobile when user drags the slider quickly
+      if (isRegroupingRef.current) {
+        return;
+      }
+
+      isRegroupingRef.current = true;
       setIsLoading(true);
       try {
         const { groups, uniquePhotos } = await groupSimilarPhotos(currentPhotos, similarityThreshold);
-        dispatch({
-          type: 'UPDATE_GROUPS',
-          groups,
-          uniquePhotos
-        });
+
+        // Only update state if this effect hasn't been cancelled
+        if (!isCancelled) {
+          dispatch({
+            type: 'UPDATE_GROUPS',
+            groups,
+            uniquePhotos
+          });
+        }
       } catch (error) {
         console.error("Failed to regroup photos:", error);
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsLoading(false);
+          isRegroupingRef.current = false;
+        }
       }
-    }, 500); // 500ms debounce
+    }, debounceTime);
 
-    return () => clearTimeout(timer);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
   }, [similarityThreshold, dispatch, stateRef]);
 
   const updateProgress = (index: number, total: number, step: ProcessingStep, fileName: string) => {
