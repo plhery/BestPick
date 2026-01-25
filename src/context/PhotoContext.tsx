@@ -320,7 +320,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
   const [isPreparingEmbeddings, setIsPreparingEmbeddings] = useState(true);
   const [qualityEmbeddings, setQualityEmbeddings] = useState<QualityEmbeddings>(null);
   const [processingProgress, setProcessingProgress] = useState<ProcessingProgress | null>(null);
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.85);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.95);
 
   // Debounced regrouping when threshold changes
   useEffect(() => {
