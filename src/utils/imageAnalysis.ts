@@ -121,7 +121,19 @@ export async function preheatModel(): Promise<void> {
 
 const HUGGINGFACE_MODEL_ID = 'plhery/mobileclip2-onnx';
 // Available model sizes: 's0' (43MB), 's2' (136MB), 'b' (330MB), 'l14' (1.1GB)
-const MODEL_SIZE = 's2';
+type ModelSize = 's0' | 's2' | 'b' | 'l14';
+
+function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function getModelSize(): ModelSize {
+  // Use smaller S0 model (43MB) on mobile, S2 (136MB) on desktop
+  return isMobileDevice() ? 's0' : 's2';
+}
+
+const MODEL_SIZE = getModelSize();
 
 async function getModels(deviceOverride?: VisionDevice) {
   const device = deviceOverride ?? currentDevice ?? getDefaultDevice();
