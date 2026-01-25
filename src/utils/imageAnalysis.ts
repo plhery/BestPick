@@ -9,25 +9,25 @@ import {
 import ExifReader from 'exifreader';
 import qualityEmbedsData from '../data/qualityEmbeds.json';
 
-// Type for the new structured quality embeddings
-interface QualityEmbeddingsSet {
-  embeddings: Tensor;
-  weights: Float32Array;
+// Category types for photos
+export type PhotoCategory = 'general' | 'face' | 'group' | 'food' | 'landscape' | 'screenshot' | 'drawing';
+
+// Quality dimension with paired positive/negative embeddings
+interface QualityDimension {
+  name: string;
+  positive: Tensor;
+  negative: Tensor;
+  weight: number;
+  categories: PhotoCategory[];
 }
 
 interface PreparedQualityEmbeddings {
-  general: {
-    positive: QualityEmbeddingsSet;
-    negative: QualityEmbeddingsSet;
-  };
-  face: {
-    positive: QualityEmbeddingsSet;
-    negative: QualityEmbeddingsSet;
-  };
+  version: number;
+  categories: Map<PhotoCategory, Tensor>;
+  dimensions: QualityDimension[];
   calibration: {
-    slope: number;
-    offset: number;
-    faceWeight: number;
+    temperature: number;
+    categoryThreshold: number;
   };
 }
 
@@ -53,10 +53,17 @@ function getErrorMessage(error: unknown): string {
 
 /* ---------- Model lazy‑loading ----------------------------------------- */
 type VisionDevice = 'auto' | 'wasm' | 'webgpu' | 'cpu';
+type ModelDtype = 'fp32' | 'fp16' | 'q8' | 'q4';
 
 let visionModelPromise: Promise<InstanceType<typeof CLIPVisionModelWithProjection>> | null = null;
 let processorPromise: Promise<InstanceType<typeof AutoProcessor>> | null = null;
 let currentDevice: VisionDevice | null = null;
+let currentDtype: ModelDtype | null = null;
+
+function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
 
 function getDefaultDevice(): VisionDevice {
   if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
@@ -66,6 +73,11 @@ function getDefaultDevice(): VisionDevice {
     return 'wasm';
   }
   return 'cpu';
+}
+
+function getDefaultDtype(): ModelDtype {
+  // Use fp16 on mobile devices to reduce memory footprint
+  return isMobileDevice() ? 'fp16' : 'fp32';
 }
 
 /**
@@ -93,14 +105,17 @@ const HUGGINGFACE_MODEL_ID = 'plhery/mobileclip2-b-onnx';
 
 async function getModels(deviceOverride?: VisionDevice) {
   const device = deviceOverride ?? currentDevice ?? getDefaultDevice();
+  const dtype = currentDtype ?? getDefaultDtype();
 
-  if (!visionModelPromise || currentDevice !== device) {
+  if (!visionModelPromise || currentDevice !== device || currentDtype !== dtype) {
     currentDevice = device;
+    currentDtype = dtype;
 
+    console.log(`Loading model with device=${device}, dtype=${dtype}`);
     processorPromise = processorPromise || AutoProcessor.from_pretrained(HUGGINGFACE_MODEL_ID);
     visionModelPromise = CLIPVisionModelWithProjection.from_pretrained(HUGGINGFACE_MODEL_ID, {
       device,
-      dtype: 'fp32',
+      dtype,
     });
   }
 
@@ -150,106 +165,116 @@ export async function extractFeatures(photo: Photo): Promise<number[]> {
   }
 }
 
-function createEmbeddingsSet(
-  embeddingsData: number[][],
-  weightsData: number[]
-): QualityEmbeddingsSet {
-  const n = embeddingsData.length;
-  const embeddingSize = embeddingsData[0].length;
-
-  const embeddings = new Tensor(
-    'float32',
-    Float32Array.from(embeddingsData.flat()),
-    [n, embeddingSize]
-  );
-
-  const weights = Float32Array.from(weightsData);
-
-  return { embeddings, weights };
+function createTensorFromArray(data: number[]): Tensor {
+  return new Tensor('float32', Float32Array.from(data), [1, data.length]);
 }
 
 export async function prepareQualityEmbeddings(): Promise<PreparedQualityEmbeddings> {
-  // Handle both old format (for backwards compatibility) and new format
   const data = qualityEmbedsData as Record<string, unknown>;
 
-  // Check if it's the new format with 'general' and 'face' keys
-  if ('general' in data && 'face' in data) {
-    const generalData = data.general as {
-      positive: number[][];
-      positiveWeights: number[];
-      negative: number[][];
-      negativeWeights: number[];
-    };
-    const faceData = data.face as {
-      positive: number[][];
-      positiveWeights: number[];
-      negative: number[][];
-      negativeWeights: number[];
-    };
+  // Check for version 2 format (paired dimensions with categories)
+  if ('version' in data && (data.version as number) === 2) {
+    const categoriesData = data.categories as Record<string, number[]>;
+    const dimensionsData = data.dimensions as Array<{
+      name: string;
+      positive: number[];
+      negative: number[];
+      weight: number;
+      categories: PhotoCategory[];
+    }>;
     const calibration = data.calibration as {
-      slope: number;
-      offset: number;
-      faceWeight: number;
+      temperature: number;
+      categoryThreshold: number;
     };
 
-    return {
-      general: {
-        positive: createEmbeddingsSet(generalData.positive, generalData.positiveWeights),
-        negative: createEmbeddingsSet(generalData.negative, generalData.negativeWeights),
-      },
-      face: {
-        positive: createEmbeddingsSet(faceData.positive, faceData.positiveWeights),
-        negative: createEmbeddingsSet(faceData.negative, faceData.negativeWeights),
-      },
-      calibration,
-    };
+    // Convert category embeddings to tensors
+    const categories = new Map<PhotoCategory, Tensor>();
+    for (const [category, embedding] of Object.entries(categoriesData)) {
+      categories.set(category as PhotoCategory, createTensorFromArray(embedding));
+    }
+
+    // Convert dimension embeddings to tensors
+    const dimensions: QualityDimension[] = dimensionsData.map(dim => ({
+      name: dim.name,
+      positive: createTensorFromArray(dim.positive),
+      negative: createTensorFromArray(dim.negative),
+      weight: dim.weight,
+      categories: dim.categories,
+    }));
+
+    return { version: 2, categories, dimensions, calibration };
   }
 
-  // Old format compatibility - treat all as general with equal weights
-  const positiveEmbeddingsData = (data as { positive: number[][] }).positive;
-  const negativeEmbeddingsData = (data as { negative: number[][] }).negative;
+  // Legacy format compatibility - convert old format to new structure
+  console.warn('Using legacy quality embeddings format. Run npm run generate-embeddings to upgrade.');
 
-  const equalPosWeights = new Array(positiveEmbeddingsData.length).fill(1.0);
-  const equalNegWeights = new Array(negativeEmbeddingsData.length).fill(1.0);
-
-  const generalSet = {
-    positive: createEmbeddingsSet(positiveEmbeddingsData, equalPosWeights),
-    negative: createEmbeddingsSet(negativeEmbeddingsData, equalNegWeights),
-  };
+  // Create minimal compatible structure from old format
+  const categories = new Map<PhotoCategory, Tensor>();
+  const dimensions: QualityDimension[] = [];
 
   return {
-    general: generalSet,
-    face: generalSet, // Use same embeddings for face in old format
+    version: 1,
+    categories,
+    dimensions,
     calibration: {
-      slope: 15,
-      offset: 1,
-      faceWeight: 0.5,
+      temperature: 10,
+      categoryThreshold: 0.15,
     },
   };
 }
 
 /**
- * Calculate weighted average similarity score.
+ * Compute cosine similarity between two tensors.
  */
-async function calculateWeightedSimilarity(
+async function cosineSimilarity(a: Tensor, b: Tensor): Promise<number> {
+  const result = await matmul(a, b.transpose(1, 0));
+  return (result.data as Float32Array)[0];
+}
+
+/**
+ * Detect photo categories using softmax over category similarities.
+ * Returns a map of category -> confidence (0-1).
+ */
+async function detectCategories(
   imageEmbedding: Tensor,
-  embeddingsSet: QualityEmbeddingsSet
-): Promise<number> {
-  const { embeddings, weights } = embeddingsSet;
+  categoryEmbeddings: Map<PhotoCategory, Tensor>
+): Promise<Map<PhotoCategory, number>> {
+  const similarities: [PhotoCategory, number][] = [];
 
-  // Compute similarities: [1, n_prompts]
-  const similarities = await matmul(imageEmbedding, embeddings.transpose(1, 0));
-  const simData = similarities.data as Float32Array;
-
-  // Weighted average
-  let weightedSum = 0;
-  let totalWeight = 0;
-  for (let i = 0; i < weights.length; i++) {
-    weightedSum += simData[i] * weights[i];
-    totalWeight += weights[i];
+  for (const [category, embedding] of categoryEmbeddings) {
+    const sim = await cosineSimilarity(imageEmbedding, embedding);
+    similarities.push([category, sim]);
   }
 
-  return weightedSum / totalWeight;
+  // Apply softmax with temperature to get probabilities
+  const temperature = 5; // Lower = more peaked distribution
+  const maxSim = Math.max(...similarities.map(([, s]) => s));
+  const expScores = similarities.map(([cat, sim]) => [cat, Math.exp((sim - maxSim) * temperature)] as [PhotoCategory, number]);
+  const sumExp = expScores.reduce((sum, [, exp]) => sum + exp, 0);
+
+  const confidences = new Map<PhotoCategory, number>();
+  for (const [cat, exp] of expScores) {
+    confidences.set(cat, exp / sumExp);
+  }
+
+  return confidences;
+}
+
+/**
+ * Calculate quality score using paired contrastive dimensions.
+ * Each dimension is normalized via sigmoid(temperature * (pos - neg)) before weighting.
+ */
+async function calculateDimensionScore(
+  imageEmbedding: Tensor,
+  dimension: QualityDimension,
+  temperature: number
+): Promise<number> {
+  const posSim = await cosineSimilarity(imageEmbedding, dimension.positive);
+  const negSim = await cosineSimilarity(imageEmbedding, dimension.negative);
+
+  // Sigmoid normalization: maps (pos - neg) to 0-1 range
+  const diff = posSim - negSim;
+  return 1 / (1 + Math.exp(-temperature * diff));
 }
 
 /* ---------- Quality + metadata analysis -------------------------------- */
@@ -257,53 +282,81 @@ export async function analyzeImage(
   photo: Photo,
   embedding: number[] | undefined,
   qualityEmbeddings: PreparedQualityEmbeddings | null
-): Promise<{ quality: number; metadata: PhotoMetadata; hasFace?: boolean }> {
+): Promise<{ quality: number; metadata: PhotoMetadata; hasFace?: boolean; detectedCategory?: PhotoCategory }> {
 
   let quality = 0;
   let hasFace = false;
+  let detectedCategory: PhotoCategory = 'general';
 
-  if (embedding && embedding.length > 0 && qualityEmbeddings) {
+  if (embedding && embedding.length > 0 && qualityEmbeddings && qualityEmbeddings.dimensions.length > 0) {
     try {
-      const v = new Tensor(
+      const imageEmbedding = new Tensor(
         'float32',
         Float32Array.from(embedding),
         [1, embedding.length]
       );
 
-      const { general, face, calibration } = qualityEmbeddings;
+      const { categories, dimensions, calibration } = qualityEmbeddings;
 
-      // Calculate general quality score
-      const generalPosScore = await calculateWeightedSimilarity(v, general.positive);
-      const generalNegScore = await calculateWeightedSimilarity(v, general.negative);
-      const generalRawScore = generalPosScore - generalNegScore;
+      // Step 1: Detect photo categories
+      const categoryConfidences = await detectCategories(imageEmbedding, categories);
 
-      // Calculate face quality score
-      const facePosScore = await calculateWeightedSimilarity(v, face.positive);
-      const faceNegScore = await calculateWeightedSimilarity(v, face.negative);
-      const faceRawScore = facePosScore - faceNegScore;
+      // Find the dominant category (excluding 'general')
+      let maxConfidence = 0;
+      for (const [cat, conf] of categoryConfidences) {
+        if (cat !== 'general' && conf > maxConfidence) {
+          maxConfidence = conf;
+          detectedCategory = cat;
+        }
+      }
 
-      // Heuristic face confidence from similarity margin
-      const faceMargin = facePosScore - faceNegScore;
-      const faceConfidence = 1 / (1 + Math.exp(-faceMargin * 8));
-      const clampedFaceConfidence = Math.min(1, Math.max(0, faceConfidence));
-      hasFace = clampedFaceConfidence > 0.4;
+      // If no specific category is confident enough, use 'general'
+      if (maxConfidence < calibration.categoryThreshold) {
+        detectedCategory = 'general';
+      }
 
-      // Blend scores based on face presence
-      // If face detected, give more weight to face-specific quality
-      const blendWeight = clampedFaceConfidence * calibration.faceWeight;
-      const rawScore = generalRawScore * (1 - blendWeight) + faceRawScore * blendWeight;
+      // Detect face presence from category
+      hasFace = detectedCategory === 'face' || detectedCategory === 'group';
 
-      // Apply calibration
-      // Maps raw score (typically -0.2 to 0.2) to 0-100 range
-      const normalizedScore = (rawScore * calibration.slope + calibration.offset);
+      // Step 2: Calculate quality score using applicable dimensions
+      let weightedSum = 0;
+      let totalWeight = 0;
+
+      for (const dimension of dimensions) {
+        // Check if this dimension applies to the detected category
+        // Also always include dimensions for 'general' category
+        const applies = dimension.categories.includes(detectedCategory) ||
+                       dimension.categories.includes('general');
+
+        if (!applies) continue;
+
+        // Calculate dimension-specific category weight
+        // If dimension is specific to detected category, full weight
+        // If dimension is general-only, reduce weight for specific categories
+        let effectiveWeight = dimension.weight;
+        if (!dimension.categories.includes(detectedCategory) && detectedCategory !== 'general') {
+          effectiveWeight *= 0.5; // General dimensions get reduced weight for specific categories
+        }
+
+        const dimScore = await calculateDimensionScore(imageEmbedding, dimension, calibration.temperature);
+        weightedSum += dimScore * effectiveWeight;
+        totalWeight += effectiveWeight;
+      }
+
+      // Normalize to 0-100 range
+      // dimScore is already 0-1 from sigmoid, so weighted average is 0-1
+      const normalizedScore = totalWeight > 0 ? weightedSum / totalWeight : 0.5;
       quality = Math.max(0, Math.min(100, Math.round(normalizedScore * 100)));
 
     } catch (error) {
       console.error("Error calculating image quality:", error);
       quality = 0;
     }
+  } else if (!qualityEmbeddings || qualityEmbeddings.dimensions.length === 0) {
+    console.warn("Quality embeddings not loaded or empty. Run 'npm run generate-embeddings' to generate them.");
+    quality = 50; // Default to neutral score
   } else {
-    console.warn("Embedding or quality embeddings not provided, setting quality to 0.");
+    console.warn("Embedding not provided, setting quality to 0.");
     quality = 0;
   }
 
@@ -315,7 +368,7 @@ export async function analyzeImage(
   const metadata: PhotoMetadata = {
     captureDate: new Date(dateFromExif?.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3") || photo.file.lastModified),
   };
-  return { quality, metadata, hasFace };
+  return { quality, metadata, hasFace, detectedCategory };
 }
 
 /* ---------- Union-Find data structure ---------------------------------- */
