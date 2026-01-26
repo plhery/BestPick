@@ -381,7 +381,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
   const [isPreparingEmbeddings, setIsPreparingEmbeddings] = useState(true);
   const [qualityEmbeddings, setQualityEmbeddings] = useState<QualityEmbeddings>(null);
   const [processingProgress, setProcessingProgress] = useState<ProcessingProgress | null>(null);
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.90);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.75);
 
   // Ref to track if re-grouping is in progress (prevents race conditions on mobile)
   const isRegroupingRef = useRef(false);
@@ -490,11 +490,11 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
           quality: 0.8,
         })) as Blob], file.name.replace(/\.hei[c|f]$/i, '.jpg'), { type: 'image/jpeg' }) : file;
 
-        // Generate efficient thumbnail (224px for CLIP)
+        // Generate efficient thumbnail (512px for SigLIP2)
         // This is the ONLY image data we will keep in memory!
         let thumbnailBlob: Blob;
         try {
-          thumbnailBlob = await generateThumbnail(nonHeicFile, 224);
+          thumbnailBlob = await generateThumbnail(nonHeicFile, 512);
         } catch (e) {
           console.warn("Failed to generate thumbnail, falling back to original file (dangerous for memory)", e);
           thumbnailBlob = nonHeicFile;
@@ -544,6 +544,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
 
         const analysisResult = {
           quality: tempAnalysisResult.quality,
+          qualityBreakdown: tempAnalysisResult.qualityBreakdown,
           metadata: {
             ...tempAnalysisResult.metadata,
             captureDate: tempAnalysisResult.metadata.captureDate ?? processingPhoto.dateCreated
@@ -562,6 +563,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
           dateCreated: processingPhoto.dateCreated,
           selected: false,
           quality: analysisResult.quality,
+          qualityBreakdown: analysisResult.qualityBreakdown,
           metadata: analysisResult.metadata,
           embedding: embedding,
           // Explicitly undefined to ensure no reference is held

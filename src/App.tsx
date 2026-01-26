@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PhotoProvider } from './context/PhotoContext';
 import { usePhotoContext } from './context/usePhotoContext';
 import Header from './components/Header';
@@ -6,6 +6,7 @@ import UploadArea from './components/UploadArea';
 import PhotoGroups from './components/PhotoGroups';
 import UniquePhotos from './components/UniquePhotos';
 import ErrorBoundary from './components/ErrorBoundary';
+import QualityDetailsModal from './components/QualityDetailsModal';
 import { Loader2, ImageIcon, Sparkles, Layers, RefreshCw } from 'lucide-react';
 import previewImageUrl from '../preview.png';
 import type { ProcessingStep } from './context/PhotoContextDef';
@@ -93,6 +94,12 @@ const LoadingOverlay: React.FC = () => {
 const MainContent: React.FC = () => {
   const { state, isLoading } = usePhotoContext();
   const hasPhotos = state.photos.length > 0;
+  const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
+
+  // Find the photo for the details modal
+  const selectedPhoto = selectedPhotoId
+    ? state.photos.find(p => p.id === selectedPhotoId) ?? null
+    : null;
 
   // Preheat the AI model on app startup
   useEffect(() => {
@@ -135,8 +142,8 @@ const MainContent: React.FC = () => {
             <div className="mb-10">
               <UploadArea />
             </div>
-            <PhotoGroups />
-            <UniquePhotos />
+            <PhotoGroups onShowPhotoDetails={setSelectedPhotoId} />
+            <UniquePhotos onShowPhotoDetails={setSelectedPhotoId} />
           </div>
         )}
       </main>
@@ -149,6 +156,14 @@ const MainContent: React.FC = () => {
         </div>
         <p className="text-slate-500 text-sm">BestPick &bull; AI-Powered Photo Organization</p>
       </footer>
+
+      {/* Quality Details Modal */}
+      {selectedPhoto && (
+        <QualityDetailsModal
+          photo={selectedPhoto}
+          onClose={() => setSelectedPhotoId(null)}
+        />
+      )}
     </div>
   );
 };

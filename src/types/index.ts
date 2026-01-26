@@ -1,3 +1,17 @@
+export type PhotoCategory = 'general' | 'face' | 'group' | 'food' | 'landscape' | 'screenshot' | 'drawing';
+
+export interface DimensionScore {
+  name: string;           // e.g., "sharpness", "face_expression"
+  score: number;          // 0-1 normalized score
+  weight: number;         // effective weight used
+}
+
+export interface QualityBreakdown {
+  detectedCategory: PhotoCategory;
+  categoryConfidences: Record<PhotoCategory, number>;
+  dimensions: DimensionScore[];
+}
+
 export interface Photo {
   id: string;
   file?: File;
@@ -9,6 +23,7 @@ export interface Photo {
   type: string;
   dateCreated: Date;
   quality?: number; // 0-100 quality score
+  qualityBreakdown?: QualityBreakdown;
   selected: boolean;
   metadata?: PhotoMetadata;
   embedding?: number[]; // Added for CLIP features

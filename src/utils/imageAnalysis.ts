@@ -1,7 +1,7 @@
-import { Photo, PhotoGroup, PhotoMetadata } from '../types';
+import { Photo, PhotoGroup, PhotoMetadata, PhotoCategory, DimensionScore, QualityBreakdown } from '../types';
 import {
   AutoProcessor,
-  CLIPVisionModelWithProjection,
+  SiglipVisionModel,
   RawImage,
   Tensor,
   matmul,
@@ -9,8 +9,8 @@ import {
 import ExifReader from 'exifreader';
 import qualityEmbedsData from '../data/qualityEmbeds.json';
 
-// Category types for photos
-export type PhotoCategory = 'general' | 'face' | 'group' | 'food' | 'landscape' | 'screenshot' | 'drawing';
+// Re-export PhotoCategory for backwards compatibility
+export type { PhotoCategory } from '../types';
 
 // Quality dimension with paired positive/negative embeddings
 interface QualityDimension {
@@ -23,10 +23,11 @@ interface QualityDimension {
 
 interface PreparedQualityEmbeddings {
   version: number;
-  categories: Map<PhotoCategory, Tensor>;
+  categories: Map<PhotoCategory, Tensor[]>;  // Array of anchor tensors per category
   dimensions: QualityDimension[];
   calibration: {
     temperature: number;
+    categoryTemperature: number;
     categoryThreshold: number;
   };
 }
@@ -70,7 +71,7 @@ function disposeTensors(...tensors: (Tensor | null | undefined)[]): void {
 type VisionDevice = 'auto' | 'wasm' | 'webgpu' | 'cpu';
 type ModelDtype = 'fp32' | 'fp16' | 'q8' | 'q4';
 
-let visionModelPromise: Promise<InstanceType<typeof CLIPVisionModelWithProjection>> | null = null;
+let visionModelPromise: Promise<InstanceType<typeof SiglipVisionModel>> | null = null;
 let processorPromise: Promise<InstanceType<typeof AutoProcessor>> | null = null;
 let currentDevice: VisionDevice | null = null;
 let currentDtype: ModelDtype | null = null;
@@ -86,7 +87,7 @@ function getDefaultDevice(): VisionDevice {
 }
 
 function getDefaultDtype(_device: VisionDevice): ModelDtype {
-  return 'fp32';
+  return 'fp16';
 }
 
 /**
@@ -100,7 +101,7 @@ export async function preheatModel(): Promise<void> {
   try {
     const { processor, vision_model } = await getModels();
 
-    // Create a small dummy image (1x1 pixel, will be resized to 224x224 by processor)
+    // Create a small dummy image (1x1 pixel, will be resized to 512x512 by processor)
     const dummyImage = new RawImage(new Uint8ClampedArray([128, 128, 128, 255]), 1, 1, 4);
     const image_inputs = await (processor as unknown as (images: RawImage[]) => Promise<{ pixel_values: Tensor }>)([dummyImage]);
     pixelValues = image_inputs.pixel_values;
@@ -119,21 +120,7 @@ export async function preheatModel(): Promise<void> {
   }
 }
 
-const HUGGINGFACE_MODEL_ID = 'plhery/mobileclip2-onnx';
-// Available model sizes: 's0' (43MB), 's2' (136MB), 'b' (330MB), 'l14' (1.1GB)
-type ModelSize = 's0' | 's2' | 'b' | 'l14';
-
-function isMobileDevice(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-}
-
-function getModelSize(): ModelSize {
-  // Use smaller S0 model (43MB) on mobile, S2 (136MB) on desktop
-  return isMobileDevice() ? 's0' : 's2';
-}
-
-const MODEL_SIZE = getModelSize();
+const HUGGINGFACE_MODEL_ID = 'onnx-community/siglip2-base-patch16-512-ONNX';
 
 async function getModels(deviceOverride?: VisionDevice) {
   const device = deviceOverride ?? currentDevice ?? getDefaultDevice();
@@ -143,14 +130,11 @@ async function getModels(deviceOverride?: VisionDevice) {
     currentDevice = device;
     currentDtype = dtype;
 
-    console.log(`Loading model ${MODEL_SIZE} with device=${device}, dtype=${dtype}`);
-    processorPromise = processorPromise || AutoProcessor.from_pretrained(HUGGINGFACE_MODEL_ID, {
-      config_file_name: `${MODEL_SIZE}/preprocessor_config.json`,
-    });
-    visionModelPromise = CLIPVisionModelWithProjection.from_pretrained(HUGGINGFACE_MODEL_ID, {
+    console.log(`Loading SigLIP2 model with device=${device}, dtype=${dtype}`);
+    processorPromise = processorPromise || AutoProcessor.from_pretrained(HUGGINGFACE_MODEL_ID);
+    visionModelPromise = SiglipVisionModel.from_pretrained(HUGGINGFACE_MODEL_ID, {
       device,
       dtype,
-      model_file_name: `${MODEL_SIZE}/vision_model`,
     });
   }
 
@@ -201,8 +185,9 @@ export async function extractFeatures(photo: Photo): Promise<number[]> {
       }
     }
 
-    imageEmbeds = (outputs.image_embeds ?? outputs.unnorm_image_features) as Tensor;
-    normalized = imageEmbeds.normalize(2, -1);
+    // SigLIP uses pooler_output instead of image_embeds
+    imageEmbeds = (outputs.pooler_output ?? outputs.image_embeds ?? outputs.last_hidden_state) as Tensor;
+    normalized = imageEmbeds.normalize ? imageEmbeds.normalize(2, -1) : imageEmbeds;
 
     // Extract data before disposal
     const embedding = Array.from(normalized.data);
@@ -227,7 +212,7 @@ export async function prepareQualityEmbeddings(): Promise<PreparedQualityEmbeddi
 
   // Check for version 2 format (paired dimensions with categories)
   if ('version' in data && (data.version as number) === 2) {
-    const categoriesData = data.categories as Record<string, number[]>;
+    const categoriesData = data.categories as Record<string, number[][] | number[]>;
     const dimensionsData = data.dimensions as Array<{
       name: string;
       positive: number[];
@@ -237,13 +222,22 @@ export async function prepareQualityEmbeddings(): Promise<PreparedQualityEmbeddi
     }>;
     const calibration = data.calibration as {
       temperature: number;
+      categoryTemperature: number;
       categoryThreshold: number;
     };
 
-    // Convert category embeddings to tensors
-    const categories = new Map<PhotoCategory, Tensor>();
-    for (const [category, embedding] of Object.entries(categoriesData)) {
-      categories.set(category as PhotoCategory, createTensorFromArray(embedding));
+    // Convert category embeddings to tensors (handle both old single-embedding and new multi-anchor format)
+    const categories = new Map<PhotoCategory, Tensor[]>();
+    for (const [category, embeddings] of Object.entries(categoriesData)) {
+      // Check if it's the new format (array of arrays) or old format (single array)
+      if (Array.isArray(embeddings[0])) {
+        // New format: array of anchor embeddings
+        const anchorTensors = (embeddings as number[][]).map(emb => createTensorFromArray(emb));
+        categories.set(category as PhotoCategory, anchorTensors);
+      } else {
+        // Old format: single embedding - wrap in array for compatibility
+        categories.set(category as PhotoCategory, [createTensorFromArray(embeddings as number[])]);
+      }
     }
 
     // Convert dimension embeddings to tensors
@@ -262,7 +256,7 @@ export async function prepareQualityEmbeddings(): Promise<PreparedQualityEmbeddi
   console.warn('Using legacy quality embeddings format. Run npm run generate-embeddings to upgrade.');
 
   // Create minimal compatible structure from old format
-  const categories = new Map<PhotoCategory, Tensor>();
+  const categories = new Map<PhotoCategory, Tensor[]>();
   const dimensions: QualityDimension[] = [];
 
   return {
@@ -271,6 +265,7 @@ export async function prepareQualityEmbeddings(): Promise<PreparedQualityEmbeddi
     dimensions,
     calibration: {
       temperature: 10,
+      categoryTemperature: 20,
       categoryThreshold: 0.15,
     },
   };
@@ -298,17 +293,25 @@ async function cosineSimilarity(a: Tensor, b: Tensor): Promise<number> {
  */
 async function detectCategories(
   imageEmbedding: Tensor,
-  categoryEmbeddings: Map<PhotoCategory, Tensor>
+  categoryEmbeddings: Map<PhotoCategory, Tensor[]>,
+  temperature: number = 20
 ): Promise<Map<PhotoCategory, number>> {
   const similarities: [PhotoCategory, number][] = [];
 
-  for (const [category, embedding] of categoryEmbeddings) {
-    const sim = await cosineSimilarity(imageEmbedding, embedding);
-    similarities.push([category, sim]);
+  for (const [category, anchorEmbeddings] of categoryEmbeddings) {
+    // Compute similarity to each anchor and take the MAX
+    let maxAnchorSim = -Infinity;
+    for (const anchorEmb of anchorEmbeddings) {
+      const sim = await cosineSimilarity(imageEmbedding, anchorEmb);
+      if (sim > maxAnchorSim) {
+        maxAnchorSim = sim;
+      }
+    }
+    similarities.push([category, maxAnchorSim]);
   }
 
   // Apply softmax with temperature to get probabilities
-  const temperature = 5; // Lower = more peaked distribution
+  // Higher temperature = more peaked distribution (bigger differences)
   const maxSim = Math.max(...similarities.map(([, s]) => s));
   const expScores = similarities.map(([cat, sim]) => [cat, Math.exp((sim - maxSim) * temperature)] as [PhotoCategory, number]);
   const sumExp = expScores.reduce((sum, [, exp]) => sum + exp, 0);
@@ -339,7 +342,7 @@ async function calculateDimensionScore(
 }
 
 /* ---------- Thumbnail Generation ------------------------------------- */
-export async function generateThumbnail(file: File, maxSize: number = 224): Promise<Blob> {
+export async function generateThumbnail(file: File, maxSize: number = 512): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -401,11 +404,12 @@ export async function analyzeImage(
   photo: Photo,
   embedding: number[] | undefined,
   qualityEmbeddings: PreparedQualityEmbeddings | null
-): Promise<{ quality: number; metadata: PhotoMetadata; hasFace?: boolean; detectedCategory?: PhotoCategory }> {
+): Promise<{ quality: number; metadata: PhotoMetadata; hasFace?: boolean; detectedCategory?: PhotoCategory; qualityBreakdown?: QualityBreakdown }> {
 
   let quality = 0;
   let hasFace = false;
   let detectedCategory: PhotoCategory = 'general';
+  let qualityBreakdown: QualityBreakdown | undefined;
 
   let imageEmbedding: Tensor | null = null;
 
@@ -421,20 +425,19 @@ export async function analyzeImage(
         const { categories, dimensions, calibration } = qualityEmbeddings;
 
         // Step 1: Detect photo categories
-        const categoryConfidences = await detectCategories(imageEmbedding, categories);
+        const categoryConfidences = await detectCategories(
+          imageEmbedding,
+          categories,
+          calibration.categoryTemperature ?? 20
+        );
 
-        // Find the dominant category (excluding 'general')
+        // Find the dominant category (highest confidence wins, including 'general')
         let maxConfidence = 0;
         for (const [cat, conf] of categoryConfidences) {
-          if (cat !== 'general' && conf > maxConfidence) {
+          if (conf > maxConfidence) {
             maxConfidence = conf;
             detectedCategory = cat;
           }
-        }
-
-        // If no specific category is confident enough, use 'general'
-        if (maxConfidence < calibration.categoryThreshold) {
-          detectedCategory = 'general';
         }
 
         // Detect face presence from category
@@ -443,6 +446,7 @@ export async function analyzeImage(
         // Step 2: Calculate quality score using applicable dimensions
         let weightedSum = 0;
         let totalWeight = 0;
+        const dimensionScores: DimensionScore[] = [];
 
         for (const dimension of dimensions) {
           // Check if this dimension applies to the detected category
@@ -463,12 +467,34 @@ export async function analyzeImage(
           const dimScore = await calculateDimensionScore(imageEmbedding, dimension, calibration.temperature);
           weightedSum += dimScore * effectiveWeight;
           totalWeight += effectiveWeight;
+
+          // Collect dimension score for breakdown
+          dimensionScores.push({
+            name: dimension.name,
+            score: dimScore,
+            weight: effectiveWeight,
+          });
         }
 
         // Normalize to 0-100 range
         // dimScore is already 0-1 from sigmoid, so weighted average is 0-1
         const normalizedScore = totalWeight > 0 ? weightedSum / totalWeight : 0.5;
         quality = Math.max(0, Math.min(100, Math.round(normalizedScore * 100)));
+
+        // Build quality breakdown for UI display
+        // Convert Map to Record for storage
+        const categoryConfidencesRecord: Record<PhotoCategory, number> = {
+          general: 0, face: 0, group: 0, food: 0, landscape: 0, screenshot: 0, drawing: 0
+        };
+        for (const [cat, conf] of categoryConfidences) {
+          categoryConfidencesRecord[cat] = conf;
+        }
+
+        qualityBreakdown = {
+          detectedCategory,
+          categoryConfidences: categoryConfidencesRecord,
+          dimensions: dimensionScores,
+        };
 
       } catch (error) {
         console.error("Error calculating image quality:", error);
@@ -515,7 +541,7 @@ export async function analyzeImage(
       }
     }
 
-    return { quality, metadata, hasFace, detectedCategory };
+    return { quality, metadata, hasFace, detectedCategory, qualityBreakdown };
   } finally {
     disposeTensor(imageEmbedding);
   }

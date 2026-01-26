@@ -15,13 +15,15 @@ interface PhotoGroupProps {
     selected: boolean;
   }>;
   similarity: number;
+  onShowPhotoDetails?: (photoId: string) => void;
 }
 
 const PhotoGroup: React.FC<PhotoGroupProps> = ({
   groupId,
   title,
   photos,
-  similarity
+  similarity,
+  onShowPhotoDetails,
 }) => {
   const { selectAllInGroup, deselectAllInGroup, toggleSelectPhoto, isSelected } = usePhotoContext();
 
@@ -81,6 +83,7 @@ const PhotoGroup: React.FC<PhotoGroupProps> = ({
               selected={isSelected(photo.id)}
               isBest={index === 0}
               onSelect={() => toggleSelectPhoto(photo.id)}
+              onShowDetails={onShowPhotoDetails ? () => onShowPhotoDetails(photo.id) : undefined}
             />
           ))}
         </div>
@@ -89,7 +92,11 @@ const PhotoGroup: React.FC<PhotoGroupProps> = ({
   );
 };
 
-const PhotoGroups: React.FC = () => {
+interface PhotoGroupsProps {
+  onShowPhotoDetails?: (photoId: string) => void;
+}
+
+const PhotoGroups: React.FC<PhotoGroupsProps> = ({ onShowPhotoDetails }) => {
   const { state } = usePhotoContext();
   const { groups } = state;
 
@@ -119,6 +126,7 @@ const PhotoGroups: React.FC = () => {
             date={group.date}
             photos={group.photos}
             similarity={group.similarity}
+            onShowPhotoDetails={onShowPhotoDetails}
           />
         ))}
       </div>

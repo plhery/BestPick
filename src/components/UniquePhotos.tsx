@@ -3,7 +3,11 @@ import { usePhotoContext } from '../context/usePhotoContext';
 import PhotoItem from './PhotoItem';
 import { Star } from 'lucide-react';
 
-const UniquePhotos: React.FC = () => {
+interface UniquePhotosProps {
+  onShowPhotoDetails?: (photoId: string) => void;
+}
+
+const UniquePhotos: React.FC<UniquePhotosProps> = ({ onShowPhotoDetails }) => {
   const { state, toggleSelectPhoto, isSelected } = usePhotoContext();
   const { uniquePhotos } = state;
 
@@ -35,6 +39,7 @@ const UniquePhotos: React.FC = () => {
             quality={photo.quality ?? 0}
             selected={isSelected(photo.id)}
             onSelect={() => toggleSelectPhoto(photo.id)}
+            onShowDetails={onShowPhotoDetails ? () => onShowPhotoDetails(photo.id) : undefined}
           />
         ))}
       </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Award, CheckCircle2 } from 'lucide-react';
+import { Award, CheckCircle2, Info } from 'lucide-react';
 
 interface PhotoItemProps {
   id: string;
@@ -9,6 +9,7 @@ interface PhotoItemProps {
   selected: boolean;
   isBest?: boolean;
   onSelect: () => void;
+  onShowDetails?: () => void;
 }
 
 const PhotoItem: React.FC<PhotoItemProps> = ({
@@ -17,6 +18,7 @@ const PhotoItem: React.FC<PhotoItemProps> = ({
   selected,
   isBest = false,
   onSelect,
+  onShowDetails,
 }) => {
   return (
     <div
@@ -49,6 +51,19 @@ const PhotoItem: React.FC<PhotoItemProps> = ({
           <Award size={14} className="text-white" />
           <span className="text-[10px] font-bold text-white uppercase tracking-wider">Best Pick</span>
         </div>
+      )}
+
+      {/* Info button - shows quality details */}
+      {onShowDetails && (
+        <button
+          className="absolute top-2 right-2 z-10 p-1.5 bg-black/50 hover:bg-black/70 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShowDetails();
+          }}
+        >
+          <Info size={16} className="text-white" />
+        </button>
       )}
 
       {/* Quality Badge Overlay */}

@@ -1,7 +1,7 @@
 import { writeFile } from 'fs/promises';
 import {
   AutoTokenizer,
-  CLIPTextModelWithProjection,
+  SiglipTextModel,
   Tensor,
 } from '@huggingface/transformers';
 
@@ -25,62 +25,77 @@ interface CategoryAnchor {
 
 // ============================================================================
 // CATEGORY DETECTION ANCHORS
+// More specific, visually-descriptive prompts work better with CLIP
 // ============================================================================
 const categoryAnchors: CategoryAnchor[] = [
   {
     category: 'face',
     anchors: [
-      'a close-up portrait of a single person',
-      'a selfie photograph',
-      'a headshot of one person',
+      'a close-up photo of one person\'s face',
+      'a selfie of a single person looking at the camera',
+      'a portrait headshot showing someone\'s face clearly',
+      'a photo focused on one human face',
+      'one person posing for a photo, face visible',
     ],
   },
   {
     category: 'group',
     anchors: [
-      'a group photo of multiple people',
-      'a family photo with several people',
-      'a crowd of people together',
+      'a photo of multiple people standing together',
+      'a group of friends posing for a picture',
+      'several people in a photo together smiling',
+      'a family gathered together for a photo',
+      'many faces visible in a group photograph',
     ],
   },
   {
     category: 'food',
     anchors: [
-      'a photograph of food on a plate',
-      'a picture of a meal or dish',
-      'food photography',
+      'a close-up photo of food on a plate',
+      'a delicious meal photographed from above',
+      'a dish of prepared food ready to eat',
+      'restaurant food photography showing a meal',
+      'a plate of food with visible ingredients',
     ],
   },
   {
     category: 'landscape',
     anchors: [
-      'a landscape photograph of nature',
-      'a scenic outdoor photograph',
-      'a photograph of mountains, beach, or countryside',
+      'a wide landscape photo of mountains and sky',
+      'a scenic nature photograph with trees and horizon',
+      'an outdoor vista showing natural scenery',
+      'a photograph of the beach and ocean',
+      'a wide-angle photo of countryside or wilderness',
     ],
   },
   {
     category: 'screenshot',
     anchors: [
-      'a screenshot of a phone or computer screen',
-      'a screen capture with text and interface',
-      'a digital screenshot',
+      'a screenshot of a mobile phone screen with apps',
+      'a computer desktop screenshot showing windows',
+      'a screen capture of a website or application',
+      'a digital screenshot with user interface elements',
+      'a phone screenshot showing a chat conversation',
     ],
   },
   {
     category: 'drawing',
     anchors: [
-      'a drawing or illustration',
-      'digital art or painting',
-      'a sketch or artwork',
+      'a hand-drawn illustration or sketch on paper',
+      'digital artwork created on a computer',
+      'a cartoon or animated style drawing',
+      'an artistic painting or illustration',
+      'a pencil sketch or colored drawing',
     ],
   },
   {
     category: 'general',
     anchors: [
-      'a photograph',
-      'a casual snapshot',
-      'an everyday photo',
+      'a photo of an object or thing',
+      'a photograph of indoor room or furniture',
+      'a picture of a building or architecture',
+      'a photo of an animal or pet',
+      'a casual photograph of everyday items',
     ],
   },
 ];
@@ -347,9 +362,7 @@ const qualityDimensions: QualityDimension[] = [
 ];
 
 // Use the same model as imageAnalysis.ts (from Hugging Face)
-const MODEL_ID = 'plhery/mobileclip2-onnx';
-// Available model sizes: 's0', 's2', 'b', 'l14'
-const MODEL_SIZE = 's2';
+const MODEL_ID = 'onnx-community/siglip2-base-patch16-512-ONNX';
 
 function tensorToArray(t: Tensor): number[] {
   return Array.from(t.data as Float32Array);
@@ -357,19 +370,20 @@ function tensorToArray(t: Tensor): number[] {
 
 async function generateEmbedding(
   tokenizer: Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>,
-  textModel: InstanceType<typeof CLIPTextModelWithProjection>,
+  textModel: InstanceType<typeof SiglipTextModel>,
   text: string
 ): Promise<number[]> {
-  const input = tokenizer(text, { padding: 'max_length', truncation: true, max_length: 77 });
-  const outputs = await textModel({ text: input.input_ids, input_ids: input.input_ids });
-  const textEmbeds = (outputs.text_embeds ?? outputs.unnorm_text_features) as Tensor;
-  const normed = textEmbeds.normalize(2, -1);
+  const input = tokenizer(text, { padding: 'max_length', truncation: true, max_length: 64 });
+  const outputs = await textModel(input);
+  // SigLIP uses pooler_output
+  const textEmbeds = (outputs.pooler_output ?? outputs.text_embeds ?? outputs.last_hidden_state) as Tensor;
+  const normed = textEmbeds.normalize ? textEmbeds.normalize(2, -1) : textEmbeds;
   return tensorToArray(normed);
 }
 
 async function generateAverageEmbedding(
   tokenizer: Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>,
-  textModel: InstanceType<typeof CLIPTextModelWithProjection>,
+  textModel: InstanceType<typeof SiglipTextModel>,
   texts: string[]
 ): Promise<number[]> {
   const embeddings = await Promise.all(texts.map(t => generateEmbedding(tokenizer, textModel, t)));
@@ -389,20 +403,22 @@ async function generateAverageEmbedding(
 }
 
 (async () => {
-  console.log(`⏬  Loading MobileCLIP2-${MODEL_SIZE.toUpperCase()} text tower from Hugging Face...`);
+  console.log(`⏬  Loading SigLIP2 text model from Hugging Face...`);
   const tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
-  const textModel = await CLIPTextModelWithProjection.from_pretrained(MODEL_ID, {
+  const textModel = await SiglipTextModel.from_pretrained(MODEL_ID, {
     device: 'cpu',
     dtype: 'fp32',
-    model_file_name: `${MODEL_SIZE}/text_model`,
   });
 
-  // Generate category detection embeddings
+  // Generate category detection embeddings (store all anchors, not averaged)
   console.log('🏷️  Generating category detection embeddings...');
-  const categories: Record<string, number[]> = {};
+  const categories: Record<string, number[][]> = {};
   for (const anchor of categoryAnchors) {
-    console.log(`   - ${anchor.category}`);
-    categories[anchor.category] = await generateAverageEmbedding(tokenizer, textModel, anchor.anchors);
+    console.log(`   - ${anchor.category} (${anchor.anchors.length} anchors)`);
+    const anchorEmbeddings = await Promise.all(
+      anchor.anchors.map(text => generateEmbedding(tokenizer, textModel, text))
+    );
+    categories[anchor.category] = anchorEmbeddings;
   }
 
   // Generate quality dimension embeddings
@@ -433,8 +449,9 @@ async function generateAverageEmbedding(
     categories,
     dimensions,
     calibration: {
-      temperature: 10,      // Sigmoid temperature for dimension scoring
-      categoryThreshold: 0.15, // Min category confidence to apply category-specific dimensions
+      temperature: 10,           // Sigmoid temperature for dimension scoring
+      categoryTemperature: 20,   // Softmax temperature for category detection (higher = more peaked)
+      categoryThreshold: 0.20,   // Min category confidence to apply category-specific dimensions
     },
   };
 
