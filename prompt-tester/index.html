@@ -99,7 +99,7 @@ a drawing or illustration"></textarea>
 
         processor = await AutoProcessor.from_pretrained(MODEL_ID);
         visionModel = await SiglipVisionModel.from_pretrained(MODEL_ID, {
-          device: 'wasm',
+          device: 'webgpu',
           dtype: 'fp16',
         });
 
@@ -107,7 +107,7 @@ a drawing or illustration"></textarea>
 
         tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
         textModel = await SiglipTextModel.from_pretrained(MODEL_ID, {
-          device: 'wasm',
+          device: 'webgpu',
           dtype: 'fp16',
         });
 

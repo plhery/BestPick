@@ -29,8 +29,8 @@ const Header: React.FC = () => {
 
   // Slider logic:
   // Left (0) = 0.99 (High threshold -> More groups)
-  // Right (100) = 0.75 (Low threshold -> Less groups)
-  const MIN_THRESHOLD = 0.75;
+  // Right (100) = 0.5 (Low threshold -> Less groups)
+  const MIN_THRESHOLD = 0.5;
   const MAX_THRESHOLD = 0.99;
   const RANGE = MAX_THRESHOLD - MIN_THRESHOLD;
 

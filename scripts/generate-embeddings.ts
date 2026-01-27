@@ -157,7 +157,7 @@ const qualityDimensions: QualityDimension[] = [
     name: 'eyes_open',
     positive: 'a person with eyes open, looking alert',
     negative: 'a person with eyes closed or blinking',
-    weight: 1.5,
+    weight: 1.3,
     categories: ['face', 'group'],
   },
   {
@@ -171,7 +171,7 @@ const qualityDimensions: QualityDimension[] = [
     name: 'smile',
     positive: 'a person smiling genuinely',
     negative: 'a person frowning or looking unhappy',
-    weight: 1.0,
+    weight: 1.8,
     categories: ['face', 'group'],
   },
   {

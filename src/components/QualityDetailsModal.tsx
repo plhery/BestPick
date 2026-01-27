@@ -76,10 +76,10 @@ const QualityDetailsModal: React.FC<QualityDetailsModalProps> = ({ photo, onClos
   const sortedDimensions = [...breakdown.dimensions].sort((a, b) => b.score - a.score);
 
   // Top strengths (highest scoring dimensions)
-  const strengths = sortedDimensions.filter(d => d.score >= 0.5).slice(0, 5);
+  const strengths = sortedDimensions.filter(d => d.score >= 0.5);
 
   // Areas for improvement (lowest scoring dimensions)
-  const improvements = sortedDimensions.filter(d => d.score < 0.5).slice(-5).reverse();
+  const improvements = sortedDimensions.filter(d => d.score < 0.5).reverse();
 
   const qualityColor = photo.quality !== undefined
     ? photo.quality >= 90 ? 'text-emerald-400'
