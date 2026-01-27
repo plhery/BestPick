@@ -7,7 +7,6 @@ import {
   Image as ImageIcon,
   CheckSquare,
   XSquare,
-  MoreHorizontal
 } from 'lucide-react';
 
 const Header: React.FC = () => {
@@ -27,20 +26,17 @@ const Header: React.FC = () => {
   const canUndo = state.currentHistoryIndex > 0;
   const canRedo = state.currentHistoryIndex < state.history.length - 1;
 
-  // Slider logic:
-  // Left (0) = 0.99 (High threshold -> More groups)
-  // Right (100) = 0.5 (Low threshold -> Less groups)
-  const MIN_THRESHOLD = 0.2;
-  const MAX_THRESHOLD = 0.99;
-  const RANGE = MAX_THRESHOLD - MIN_THRESHOLD;
+  // Slider: left = low threshold (more grouping), right = high threshold (less grouping)
+  const MIN_THRESHOLD = 0.5;
+  const MAX_THRESHOLD = 0.95;
 
-  const sliderValue = ((MAX_THRESHOLD - similarityThreshold) / RANGE) * 100;
+  const sliderValue = ((similarityThreshold - MIN_THRESHOLD) / (MAX_THRESHOLD - MIN_THRESHOLD)) * 100;
 
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
-    const newThreshold = MAX_THRESHOLD - (val / 100) * RANGE;
-    const clamped = Math.max(MIN_THRESHOLD, Math.min(MAX_THRESHOLD, newThreshold));
-    setSimilarityThreshold(clamped);
+    const newThreshold = MIN_THRESHOLD + (val / 100) * (MAX_THRESHOLD - MIN_THRESHOLD);
+    console.log('Similarity threshold changed:', newThreshold.toFixed(3));
+    setSimilarityThreshold(newThreshold);
   };
 
   return (
@@ -66,7 +62,7 @@ const Header: React.FC = () => {
             <>
               {/* Grouping Sensitivity Slider */}
               <div className="flex items-center space-x-3 bg-slate-800/50 rounded-full px-4 py-1.5 border border-white/5 w-full md:w-auto">
-                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Similar</span>
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">More</span>
                 <input
                   type="range"
                   min="0"
@@ -76,7 +72,7 @@ const Header: React.FC = () => {
                   onChange={handleSliderChange}
                   className="w-full md:w-24 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
                 />
-                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Distinct</span>
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Fewer</span>
               </div>
 
               <div className="h-6 w-px bg-white/10 hidden md:block" />

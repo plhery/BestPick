@@ -381,7 +381,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
   const [isPreparingEmbeddings, setIsPreparingEmbeddings] = useState(true);
   const [qualityEmbeddings, setQualityEmbeddings] = useState<QualityEmbeddings>(null);
   const [processingProgress, setProcessingProgress] = useState<ProcessingProgress | null>(null);
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.6);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.85);
 
   // Ref to track if re-grouping is in progress (prevents race conditions on mobile)
   const isRegroupingRef = useRef(false);
