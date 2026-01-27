@@ -507,27 +507,6 @@ async function generateEmbedding(
   return tensorToArray(normed);
 }
 
-async function generateAverageEmbedding(
-  tokenizer: Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>,
-  textModel: InstanceType<typeof SiglipTextModel>,
-  texts: string[]
-): Promise<number[]> {
-  const embeddings = await Promise.all(texts.map(t => generateEmbedding(tokenizer, textModel, t)));
-
-  // Average the embeddings
-  const dim = embeddings[0].length;
-  const avg = new Array(dim).fill(0);
-  for (const emb of embeddings) {
-    for (let i = 0; i < dim; i++) {
-      avg[i] += emb[i] / embeddings.length;
-    }
-  }
-
-  // Normalize the averaged embedding
-  const norm = Math.sqrt(avg.reduce((s, v) => s + v * v, 0));
-  return avg.map(v => v / norm);
-}
-
 (async () => {
   console.log(`⏬  Loading SigLIP2 text model from Hugging Face...`);
   const tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);

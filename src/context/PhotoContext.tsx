@@ -433,7 +433,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
       isCancelled = true;
       clearTimeout(timer);
     };
-  }, [similarityThreshold, dispatch, stateRef]);
+  }, [similarityThreshold, dispatch, stateRef, isMobile]);
 
   const updateProgress = (index: number, total: number, step: ProcessingStep, fileName: string) => {
     setProcessingProgress({

@@ -86,7 +86,7 @@ function getDefaultDevice(): VisionDevice {
   return 'cpu';
 }
 
-function getDefaultDtype(_device: VisionDevice): ModelDtype {
+function getDefaultDtype(): ModelDtype {
   return 'fp16';
 }
 
@@ -96,7 +96,7 @@ function getDefaultDtype(_device: VisionDevice): ModelDtype {
  */
 export async function preheatModel(): Promise<void> {
   let pixelValues: Tensor | null = null;
-  let outputs: any = null;
+  let outputs: { dispose?: () => void } | null = null;
 
   try {
     const { processor, vision_model } = await getModels();
@@ -124,7 +124,7 @@ const HUGGINGFACE_MODEL_ID = 'onnx-community/siglip2-base-patch16-512-ONNX';
 
 async function getModels(deviceOverride?: VisionDevice) {
   const device = deviceOverride ?? currentDevice ?? getDefaultDevice();
-  const dtype = currentDtype ?? getDefaultDtype(device);
+  const dtype = currentDtype ?? getDefaultDtype();
 
   if (!visionModelPromise || currentDevice !== device || currentDtype !== dtype) {
     currentDevice = device;
@@ -160,7 +160,7 @@ export async function extractFeatures(photo: Photo): Promise<number[]> {
   }
 
   let pixelValues: Tensor | null = null;
-  let outputs: any = null;
+  let outputs: { pooler_output?: Tensor; image_embeds?: Tensor; last_hidden_state?: Tensor; dispose?: () => void } | null = null;
   let imageEmbeds: Tensor | null = null;
   let normalized: Tensor | null = null;
 
