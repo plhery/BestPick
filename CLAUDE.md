@@ -12,7 +12,7 @@ BestPick is a React application for photo organization that uses machine learnin
 - `npm run build` - Build for production
 - `npm run lint` - Run ESLint
 - `npm run preview` - Preview production build
-- `npm run generate-embeddings` - Regenerate quality embeddings from text prompts (requires ML model in public/models/)
+- `npm run generate-embeddings` - Regenerate quality embeddings from text prompts (downloads model from HuggingFace)
 
 ## Architecture
 
@@ -30,10 +30,9 @@ The app uses React Context with `useReducer` for state management ([src/context/
 The core ML functionality is in [src/utils/imageAnalysis.ts](src/utils/imageAnalysis.ts):
 
 #### Model Loading
-- Uses **MobileCLIP2** vision and text models from Hugging Face (`plhery/mobileclip2-onnx`)
-- Available model sizes: S0 (43MB), S2 (136MB, default), B (330MB), L-14 (1.1GB)
+- Uses **SigLIP2** vision model from Hugging Face (`onnx-community/siglip2-base-patch16-512-ONNX`)
 - Lazy loads models on first use with device detection (WebGPU → WASM → CPU fallback)
-- Model size configurable via `MODEL_SIZE` constant in imageAnalysis.ts
+- Uses fp16 precision by default for efficiency
 
 #### Feature Extraction
 - `extractFeatures(photo)` - Generates normalized 512-dimensional embeddings from images
@@ -42,11 +41,12 @@ The core ML functionality is in [src/utils/imageAnalysis.ts](src/utils/imageAnal
 
 #### Quality Scoring
 - `prepareQualityEmbeddings()` - Loads pre-computed embeddings from [src/data/qualityEmbeds.json](src/data/qualityEmbeds.json)
-- Supports two scoring modes: **general** (landscapes, objects) and **face** (portraits)
-- `analyzeImage()` computes weighted similarity against positive/negative prompt embeddings
-- Face detection heuristic uses sigmoid on face similarity margin with 0.4 threshold
-- Blends general + face scores based on face confidence and `calibration.faceWeight`
-- Maps raw similarity scores to 0-100 range using calibration slope/offset
+- **Category Detection**: Classifies photos into 10 categories (general, face, group, food, landscape, screenshot, drawing, pet, document, night) using softmax over anchor embeddings
+- **Dimension Scoring**: 44 quality dimensions, each with positive/negative prompt pairs
+- Score formula: `sigmoid(temperature × (pos_similarity - neg_similarity))` per dimension
+- Category-specific dimensions only apply to matching photos (e.g., pet_attention only for pet photos)
+- **Context-aware modulation**: Group photos get boosted weights for group-specific dimensions (+30%) and reduced weights for individual face dimensions (-30%)
+- Final score is weighted average of applicable dimensions, mapped to 0-100
 - Extracts EXIF metadata (capture date) using ExifReader
 
 #### Photo Grouping
@@ -80,14 +80,18 @@ Progress updates via `setProcessingProgress()` are displayed in the UI overlay.
 
 The [scripts/generate-embeddings.ts](scripts/generate-embeddings.ts) script:
 
-- Loads MobileCLIP2 text model from HuggingFace (`plhery/mobileclip2-onnx`)
-- Generates embeddings for weighted prompt sets (general and face, positive and negative)
+- Loads SigLIP2 text model from HuggingFace (`onnx-community/siglip2-base-patch16-512-ONNX`)
+- Generates embeddings for 10 category anchors and 44 quality dimensions
+- Each dimension has paired positive/negative prompts with weights
 - Outputs to [src/data/qualityEmbeds.json](src/data/qualityEmbeds.json) with structure:
   ```json
   {
-    "general": { "positive": [], "positiveWeights": [], "negative": [], "negativeWeights": [] },
-    "face": { "positive": [], "positiveWeights": [], "negative": [], "negativeWeights": [] },
-    "calibration": { "slope": 12, "offset": 0.5, "faceWeight": 0.6 }
+    "version": 2,
+    "categories": { "face": [[...anchor embeddings...]], "pet": [...], ... },
+    "dimensions": [
+      { "name": "sharpness", "positive": [...], "negative": [...], "weight": 1.5, "categories": ["general", "face", ...] }
+    ],
+    "calibration": { "temperature": 18, "categoryTemperature": 20, "categoryThreshold": 0.20 }
   }
   ```
 
@@ -112,7 +116,7 @@ The [scripts/generate-embeddings.ts](scripts/generate-embeddings.ts) script:
 ## Important Notes
 
 - All ML processing runs client-side; no backend required
-- Models are loaded from HuggingFace (`plhery/mobileclip2-onnx`) on first use
+- Models are loaded from HuggingFace (`onnx-community/siglip2-base-patch16-512-ONNX`) on first use
 - Quality embeddings are pre-generated; run `npm run generate-embeddings` after changing prompts in the script
 - The app creates object URLs for images; these are not revoked during runtime to maintain display
 - Auto-selection logic: Selects best photo (highest quality) from each group + all unique photos

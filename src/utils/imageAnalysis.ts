@@ -440,13 +440,19 @@ export async function analyzeImage(
           }
         }
 
-        // Detect face presence from category
-        hasFace = detectedCategory === 'face' || detectedCategory === 'group';
+        // Detect face presence from category (includes pet for animal faces)
+        hasFace = detectedCategory === 'face' || detectedCategory === 'group' || detectedCategory === 'pet';
 
         // Step 2: Calculate quality score using applicable dimensions
         let weightedSum = 0;
         let totalWeight = 0;
         const dimensionScores: DimensionScore[] = [];
+
+        // Context-aware weight modulation: boost group-specific dimensions for group photos
+        // and reduce individual face dimensions
+        const isGroupPhoto = detectedCategory === 'group';
+        const groupDimensionNames = ['everyone_visible', 'group_attention', 'group_arrangement'];
+        const individualFaceDimensionNames = ['face_angle', 'face_lighting'];
 
         for (const dimension of dimensions) {
           // Check if this dimension applies to the detected category
@@ -462,6 +468,15 @@ export async function analyzeImage(
           let effectiveWeight = dimension.weight;
           if (!dimension.categories.includes(detectedCategory) && detectedCategory !== 'general') {
             effectiveWeight *= 0.5; // General dimensions get reduced weight for specific categories
+          }
+
+          // Context-aware modulation for group photos
+          if (isGroupPhoto) {
+            if (groupDimensionNames.includes(dimension.name)) {
+              effectiveWeight *= 1.3; // Boost group-specific dimensions by 30%
+            } else if (individualFaceDimensionNames.includes(dimension.name)) {
+              effectiveWeight *= 0.7; // Reduce individual face dimensions by 30%
+            }
           }
 
           const dimScore = await calculateDimensionScore(imageEmbedding, dimension, calibration.temperature);
@@ -484,7 +499,7 @@ export async function analyzeImage(
         // Build quality breakdown for UI display
         // Convert Map to Record for storage
         const categoryConfidencesRecord: Record<PhotoCategory, number> = {
-          general: 0, face: 0, group: 0, food: 0, landscape: 0, screenshot: 0, drawing: 0
+          general: 0, face: 0, group: 0, food: 0, landscape: 0, screenshot: 0, drawing: 0, pet: 0, document: 0, night: 0
         };
         for (const [cat, conf] of categoryConfidences) {
           categoryConfidencesRecord[cat] = conf;

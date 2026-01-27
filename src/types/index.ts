@@ -1,4 +1,4 @@
-export type PhotoCategory = 'general' | 'face' | 'group' | 'food' | 'landscape' | 'screenshot' | 'drawing';
+export type PhotoCategory = 'general' | 'face' | 'group' | 'food' | 'landscape' | 'screenshot' | 'drawing' | 'pet' | 'document' | 'night';
 
 export interface DimensionScore {
   name: string;           // e.g., "sharpness", "face_expression"

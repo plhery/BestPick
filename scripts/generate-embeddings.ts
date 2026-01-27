@@ -6,7 +6,7 @@ import {
 } from '@huggingface/transformers';
 
 // Category types for photos
-type PhotoCategory = 'general' | 'face' | 'group' | 'food' | 'landscape' | 'screenshot' | 'drawing';
+type PhotoCategory = 'general' | 'face' | 'group' | 'food' | 'landscape' | 'screenshot' | 'drawing' | 'pet' | 'document' | 'night';
 
 // Paired quality dimension - each dimension is normalized via sigmoid(pos - neg)
 interface QualityDimension {
@@ -94,8 +94,38 @@ const categoryAnchors: CategoryAnchor[] = [
       'a photo of an object or thing',
       'a photograph of indoor room or furniture',
       'a picture of a building or architecture',
-      'a photo of an animal or pet',
       'a casual photograph of everyday items',
+      'a photograph of a vehicle or machine',
+    ],
+  },
+  {
+    category: 'pet',
+    anchors: [
+      'a close-up photo of a pet dog or cat',
+      'an animal looking at the camera',
+      'a cute pet portrait photograph',
+      'a photo of a furry animal companion',
+      'a dog or cat posing for a picture',
+    ],
+  },
+  {
+    category: 'document',
+    anchors: [
+      'a photo of a paper document or receipt',
+      'a photograph of printed text on paper',
+      'a scanned document or form',
+      'a photo of handwritten notes',
+      'a photographed invoice or bill',
+    ],
+  },
+  {
+    category: 'night',
+    anchors: [
+      'a nighttime photograph with city lights',
+      'a low-light photo taken at night',
+      'a photograph of stars or night sky',
+      'a dark atmospheric photograph',
+      'a night scene with artificial lighting',
     ],
   },
 ];
@@ -112,35 +142,35 @@ const qualityDimensions: QualityDimension[] = [
     positive: 'a sharp, crisp, in-focus photograph',
     negative: 'a blurry, soft, out of focus photograph',
     weight: 1.5,
-    categories: ['general', 'face', 'group', 'food', 'landscape'],
+    categories: ['general', 'face', 'group', 'food', 'landscape', 'pet'],
   },
   {
     name: 'exposure',
     positive: 'a well-exposed photograph with good brightness',
     negative: 'a poorly exposed, too dark or washed out photograph',
     weight: 1.3,
-    categories: ['general', 'face', 'group', 'food', 'landscape'],
+    categories: ['general', 'face', 'group', 'food', 'landscape', 'pet'],
   },
   {
     name: 'noise',
     positive: 'a clean photograph with smooth tones',
     negative: 'a noisy, grainy photograph with visible grain',
     weight: 1.0,
-    categories: ['general', 'face', 'group', 'food', 'landscape'],
+    categories: ['general', 'face', 'group', 'food', 'landscape', 'pet'],
   },
   {
     name: 'composition',
     positive: 'a well-composed, balanced photograph',
     negative: 'a poorly framed, awkwardly cropped photograph',
     weight: 1.1,
-    categories: ['general', 'face', 'group', 'food', 'landscape'],
+    categories: ['general', 'face', 'group', 'food', 'landscape', 'pet', 'night'],
   },
   {
     name: 'colors',
     positive: 'a photograph with pleasing, natural colors',
     negative: 'a photograph with ugly, unnatural color cast',
     weight: 0.9,
-    categories: ['general', 'face', 'group', 'food', 'landscape'],
+    categories: ['general', 'face', 'group', 'food', 'landscape', 'pet'],
   },
 
   // ---------------------------
@@ -171,7 +201,7 @@ const qualityDimensions: QualityDimension[] = [
     name: 'smile',
     positive: 'a person smiling genuinely',
     negative: 'a person frowning or looking unhappy',
-    weight: 1.8,
+    weight: 1.3,
     categories: ['face', 'group'],
   },
   {
@@ -189,14 +219,14 @@ const qualityDimensions: QualityDimension[] = [
     name: 'everyone_visible',
     positive: 'a group photo with everyone clearly visible',
     negative: 'a group photo with people cut off or hidden',
-    weight: 1.4,
+    weight: 1.7,
     categories: ['group'],
   },
   {
     name: 'group_attention',
     positive: 'everyone in the group looking at camera',
     negative: 'people in the group looking away or distracted',
-    weight: 1.2,
+    weight: 1.5,
     categories: ['group'],
   },
   {
@@ -319,6 +349,102 @@ const qualityDimensions: QualityDimension[] = [
     negative: 'visually unappealing, ugly artwork',
     weight: 1.2,
     categories: ['drawing'],
+  },
+
+  // ---------------------------
+  // PET/ANIMAL SPECIFIC
+  // ---------------------------
+  {
+    name: 'pet_attention',
+    positive: 'a pet looking at the camera, alert and engaged',
+    negative: 'a pet looking away, distracted or sleeping',
+    weight: 1.4,
+    categories: ['pet'],
+  },
+  {
+    name: 'pet_expression',
+    positive: 'a pet with a cute, expressive face',
+    negative: 'a pet with dull, uninteresting expression',
+    weight: 1.3,
+    categories: ['pet'],
+  },
+  {
+    name: 'pet_posture',
+    positive: 'a pet in a flattering, photogenic position',
+    negative: 'a pet in an awkward or unflattering position',
+    weight: 1.0,
+    categories: ['pet'],
+  },
+  {
+    name: 'pet_fur',
+    positive: 'a pet with clean, well-groomed fur or coat',
+    negative: 'a pet with messy, dirty, or matted fur',
+    weight: 0.8,
+    categories: ['pet'],
+  },
+
+  // ---------------------------
+  // DOCUMENT SPECIFIC
+  // ---------------------------
+  {
+    name: 'document_flat',
+    positive: 'a flat, well-aligned document photograph',
+    negative: 'a skewed, crumpled, or curved document photo',
+    weight: 1.4,
+    categories: ['document'],
+  },
+  {
+    name: 'document_complete',
+    positive: 'a complete document with all edges visible',
+    negative: 'a cropped document with cut-off text or edges',
+    weight: 1.3,
+    categories: ['document'],
+  },
+  {
+    name: 'document_legible',
+    positive: 'a document photo with clear, readable text',
+    negative: 'a document photo with blurry, illegible text',
+    weight: 1.5,
+    categories: ['document'],
+  },
+  {
+    name: 'document_lighting',
+    positive: 'a document with even, shadow-free lighting',
+    negative: 'a document with shadows, glare, or uneven lighting',
+    weight: 1.1,
+    categories: ['document'],
+  },
+
+  // ---------------------------
+  // NIGHT PHOTOGRAPHY SPECIFIC
+  // ---------------------------
+  {
+    name: 'night_exposure',
+    positive: 'a well-exposed night photograph with visible details',
+    negative: 'an underexposed, too dark night photograph',
+    weight: 1.3,
+    categories: ['night'],
+  },
+  {
+    name: 'night_sharpness',
+    positive: 'a sharp night photograph without camera shake',
+    negative: 'a blurry night photograph with motion blur from camera shake',
+    weight: 1.4,
+    categories: ['night'],
+  },
+  {
+    name: 'night_lights',
+    positive: 'beautiful light trails or bokeh in night photography',
+    negative: 'blown out, overexposed lights in night photography',
+    weight: 1.0,
+    categories: ['night'],
+  },
+  {
+    name: 'night_atmosphere',
+    positive: 'atmospheric, moody night photograph',
+    negative: 'flat, uninteresting night photograph',
+    weight: 1.1,
+    categories: ['night'],
   },
 
   // ---------------------------
@@ -449,7 +575,7 @@ async function generateAverageEmbedding(
     categories,
     dimensions,
     calibration: {
-      temperature: 10,           // Sigmoid temperature for dimension scoring
+      temperature: 18,           // Sigmoid temperature for dimension scoring (higher = more spread from 0.5)
       categoryTemperature: 20,   // Softmax temperature for category detection (higher = more peaked)
       categoryThreshold: 0.20,   // Min category confidence to apply category-specific dimensions
     },
